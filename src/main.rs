@@ -1,3 +1,4 @@
+mod lexer;
 mod parser;
 
 use std::env;
@@ -5,7 +6,6 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::io::BufReader;
 
 fn main() {
     let config = parse_args();
@@ -84,7 +84,8 @@ fn compile_the_thing(filename: &str) -> Result<(), CompileError> {
         filename: filename.to_string(),
         source: e,
     })?;
-    let _reader = BufReader::new(file);
+
+    lexer::tokenize(file);
 
     // Placeholder for actual parsing logic
     Err(CompileError::ParseError {
