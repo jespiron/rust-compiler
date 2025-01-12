@@ -4,7 +4,62 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 
 #[derive(Debug)]
-pub enum Token {}
+pub enum Token {
+    // Literals
+    // a-z a-Z 0-9 " '
+    IDENTIFIER(String),
+    STRING,
+    NUMBER,
+
+    // Single-character tokens
+    // ( ) { } . , ; + - * /
+    LEFT_PAREN,
+    RIGHT_PAREN,
+    LEFT_BRACE,
+    RIGHT_BRACE,
+    DOT,
+    COMMA,
+    SEMICOLON,
+    PLUS,
+    MINUS,
+    STAR,
+    SLASH,
+
+    // One or two character tokens
+    // < = > !
+    LESS,
+    LESS_EQUAL,
+    EQUAL,
+    EQUAL_EQUAL,
+    GREATER,
+    GREATER_EQUAL,
+    BANG,
+    BANG_EQUAL,
+
+    // Reserved Keywords
+    CONST,
+    VOID,
+    INT,
+    CHAR,
+    DOUBLE,
+    STRUCT,
+    IF,
+    ELSE,
+    SWITCH,
+    CASE,
+    DEFAULT,
+    WHILE,
+    FOR,
+    DO,
+    RETURN,
+    BREAK,
+    CONTINUE,
+    PRINT,
+    SCAN,
+
+    // EOF
+    EOF,
+}
 
 pub fn tokenize(file: File) -> Vec<Token> {
     let tokens = vec![];
