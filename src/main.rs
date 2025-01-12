@@ -6,39 +6,39 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 
 fn main() {
     let config = parse_args();
-    if let Some(filename) = config.filename {
-        match compile_the_thing(&filename) {
-            Ok(()) => {
-                println!("Compilation succeeded");
-            }
-            Err(e) => {
-                // Pretty print the error
-                eprintln!("{}", e);
 
-                // Optionally, print the cause chain for detailed debugging
-                let mut source = e.source();
-                while let Some(cause) = source {
-                    eprintln!("Caused by: {}", cause);
-                    source = cause.source();
-                }
+    match compile_the_thing(config) {
+        Ok(()) => {
+            println!("Compilation succeeded");
+        }
+        Err(e) => {
+            // Pretty print the error
+            eprintln!("{}", e);
+
+            // Optionally, print the cause chain for detailed debugging
+            let mut source = e.source();
+            while let Some(cause) = source {
+                eprintln!("Caused by: {}", cause);
+                source = cause.source();
             }
         }
-    } else {
-        eprintln!("Usage: <program> <filename>");
     }
 }
 
 pub struct Config {
     pub filename: Option<String>,
+    pub src_dir: String,
 }
 
 impl Config {
     fn default() -> Self {
         Config {
-            filename: None, // Source file to compile.
+            filename: None, // Source file to compile
+            src_dir: String::from("samples"),
         }
     }
 }
@@ -60,6 +60,7 @@ pub fn parse_args() -> Config {
 
 #[derive(Debug)]
 enum CompileError {
+    InvalidCommand {},
     FileNotFound { filename: String, source: io::Error },
     ParseError { filename: String, message: String },
 }
@@ -67,6 +68,9 @@ enum CompileError {
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CompileError::InvalidCommand {} => {
+                write!(f, "Usage: <program> <filename>")
+            }
             CompileError::FileNotFound { filename, source } => {
                 write!(f, "Failed to open file '{}': {}", filename, source)
             }
@@ -79,17 +83,27 @@ impl fmt::Display for CompileError {
 
 impl Error for CompileError {}
 
-fn compile_the_thing(filename: &str) -> Result<(), CompileError> {
-    let file = fs::File::open(&filename).map_err(|e| CompileError::FileNotFound {
-        filename: filename.to_string(),
-        source: e,
-    })?;
+fn compile_the_thing(config: Config) -> Result<(), CompileError> {
+    match config.filename {
+        None => Err(CompileError::InvalidCommand {}),
+        Some(filename) => {
+            // Construct the full path: src_dir/filename
+            let mut path = PathBuf::from(config.src_dir);
+            path.push(&filename);
 
-    lexer::tokenize(file);
+            // Open the file at the constructed path
+            let file = fs::File::open(&path).map_err(|e| CompileError::FileNotFound {
+                filename: path.to_string_lossy().into(),
+                source: e,
+            })?;
 
-    // Placeholder for actual parsing logic
-    Err(CompileError::ParseError {
-        filename: filename.to_string(),
-        message: "Parsing not implemented yet".into(),
-    })
+            lexer::tokenize(file);
+
+            // Placeholder for actual parsing logic
+            Err(CompileError::ParseError {
+                filename: filename.to_string(),
+                message: "Parsing not implemented yet".into(),
+            })
+        }
+    }
 }
