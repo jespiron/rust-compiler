@@ -1,5 +1,4 @@
 mod lexer;
-mod parser;
 
 use std::env;
 use std::error::Error;
