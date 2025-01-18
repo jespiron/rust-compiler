@@ -3,7 +3,7 @@ use crate::lexer::Token;
 
 // Program is comprised of variables and functions
 pub struct Program {
-    pub decl: Vec<VarDecalaration>,
+    pub decl: Vec<VarDeclaration>,
     pub fns: Vec<FnDeclaration>,
 }
 
@@ -22,12 +22,14 @@ pub struct FnDeclaration {
 
 #[derive(Debug)]
 pub enum Expr {
-    Literal(Token),            // leaf node of the expression tree
-    Unary(Token, Expr),        // like `!expression`
-    Binary(Expr, Token, Expr), // like `2+3`
-    Parentheses(Expr),         // like `(expression)`
+    Literal(Token),                      // leaf node of the expression tree
+    Unary(Token, Box<Expr>),             // like `!expression`
+    Binary(Box<Expr>, Token, Box<Expr>), // like `2+3`
+    Parentheses(Box<Expr>),              // like `(expression)`
 }
 
-pub fn parse(tokens: Vec<Token>) -> AstNode {
-    AstNode {}
+pub fn parse(tokens: Vec<Token>) -> Program {
+    let decl = vec![];
+    let fns = vec![];
+    Program { decl, fns }
 }

@@ -1,4 +1,5 @@
 mod lexer;
+mod parser;
 
 use std::env;
 use std::error::Error;
@@ -96,7 +97,8 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
                 source: e,
             })?;
 
-            lexer::tokenize(file);
+            let tokens = lexer::tokenize(file);
+            parser::parse(tokens);
 
             // Placeholder for actual parsing logic
             Err(CompileError::ParseError {
