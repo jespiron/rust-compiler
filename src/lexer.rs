@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, Read};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // Literals
     Identifier(String),

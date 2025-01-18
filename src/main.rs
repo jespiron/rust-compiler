@@ -98,7 +98,7 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             })?;
 
             let tokens = lexer::tokenize(file);
-            parser::parse(tokens);
+            let _program = parser::parse(tokens);
 
             // Placeholder for actual parsing logic
             Err(CompileError::ParseError {

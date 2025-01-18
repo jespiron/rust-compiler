@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::lexer::Token;
-    use crate::parser::{parse, Expr, Program, Statement};
+    use rust_compiler::lexer::Token;
+    use rust_compiler::parser::{parse, Expr, Program, Statement};
 
     #[test]
     fn test_hello_world() {
