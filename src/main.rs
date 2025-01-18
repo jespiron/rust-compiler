@@ -61,8 +61,14 @@ pub fn parse_args() -> Config {
 #[derive(Debug)]
 enum CompileError {
     InvalidCommand {},
-    FileNotFound { filename: String, source: io::Error },
-    ParseError { filename: String, message: String },
+    FileNotFound {
+        filename: String,
+        source: io::Error,
+    },
+    ParserError {
+        filename: String,
+        source: parser::ParserError,
+    },
 }
 
 impl fmt::Display for CompileError {
@@ -74,8 +80,8 @@ impl fmt::Display for CompileError {
             CompileError::FileNotFound { filename, source } => {
                 write!(f, "Failed to open file '{}': {}", filename, source)
             }
-            CompileError::ParseError { filename, message } => {
-                write!(f, "Error parsing file '{}': {}", filename, message)
+            CompileError::ParserError { filename, source } => {
+                write!(f, "Error parsing file '{}': {}", filename, source)
             }
         }
     }
@@ -98,13 +104,12 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             })?;
 
             let tokens = lexer::tokenize(file);
-            let _program = parser::parse(tokens);
-
-            // Placeholder for actual parsing logic
-            Err(CompileError::ParseError {
+            let _program = parser::parse(tokens).map_err(|e| CompileError::ParserError {
                 filename: filename.to_string(),
-                message: "Parsing not implemented yet".into(),
-            })
+                source: e,
+            })?;
+
+            Ok(())
         }
     }
 }
