@@ -1,3 +1,4 @@
+mod codegen;
 mod lexer;
 mod parser;
 
@@ -87,9 +88,10 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
     match config.filename {
         None => Err(CompileError::InvalidCommand {}),
         Some(filename) => {
-            // Construct the full path: src_dir/filename
-            let mut path = PathBuf::from(config.src_dir);
+            // Construct the full path: src_dir/filename.c0
+            let mut path = PathBuf::from(&config.src_dir);
             path.push(&filename);
+            path.set_extension("c0");
 
             // Open the file at the constructed path
             let file = fs::File::open(&path).map_err(|e| CompileError::FileNotFound {
@@ -98,7 +100,21 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             })?;
 
             let tokens = lexer::tokenize(file);
-            let _program = parser::parse(tokens);
+            let program = parser::parse(tokens);
+            let ops = codegen::generate_code(program);
+
+            // Construct the output path: src_dir/target/filename.o0
+            let mut outpath = PathBuf::from(&config.src_dir);
+            outpath.push("target");
+            fs::create_dir_all(&outpath).map_err(|e| CompileError::FileNotFound {
+                filename: outpath.to_string_lossy().into(),
+                source: e,
+            })?;
+            outpath.push(&filename);
+            outpath.set_extension("o0");
+
+            // Write the output file
+            codegen::to_binary_file(ops, outpath);
 
             // Placeholder for actual parsing logic
             Err(CompileError::ParseError {
