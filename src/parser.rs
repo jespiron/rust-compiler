@@ -1,4 +1,5 @@
 use crate::lexer::Token;
+use std::fmt;
 
 // Program is comprised of variables and functions
 #[derive(Debug)]
@@ -62,6 +63,33 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Expr>),          // function call with arguments
 }
 
+#[derive(Debug)]
+pub enum ParserError {
+    UnexpectedToken { found: Token, expected: Vec<Token> },
+    UnexpectedEOF { expected: Vec<Token> },
+    InvalidExpression,
+}
+
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParserError::UnexpectedToken { found, expected } => {
+                write!(
+                    f,
+                    "Unexpected token: {:?}. Expected one of: {:?}",
+                    found, expected
+                )
+            }
+            ParserError::UnexpectedEOF { expected } => {
+                write!(f, "Unexpected EOF. Expected one of: {:?}", expected)
+            }
+            ParserError::InvalidExpression {} => {
+                write!(f, "Invalid expression")
+            }
+        }
+    }
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
@@ -72,18 +100,18 @@ impl Parser {
         Parser { tokens, current: 0 }
     }
 
-    pub fn parse(&mut self) -> Program {
+    pub fn parse(&mut self) -> Result<Program, ParserError> {
         let mut declarations = Vec::new();
         let mut functions = Vec::new();
 
         while !self.is_at_end() {
             if self.match_token(&[Token::Const]) {
-                declarations.push(self.variable_declaration(true));
+                declarations.push(self.variable_declaration(true)?);
             } else if self.check_type_token() {
                 if self.peek_ahead_for_lparen() {
-                    functions.push(self.function_declaration());
+                    functions.push(self.function_declaration()?);
                 } else {
-                    declarations.push(self.variable_declaration(false));
+                    declarations.push(self.variable_declaration(false)?);
                 }
             } else {
                 // Error handling could be added here
@@ -91,53 +119,53 @@ impl Parser {
             }
         }
 
-        Program {
+        Ok(Program {
             decl: declarations,
             fns: functions,
-        }
+        })
     }
 
-    fn variable_declaration(&mut self, is_const: bool) -> VarDeclaration {
+    fn variable_declaration(&mut self, is_const: bool) -> Result<VarDeclaration, ParserError> {
         let type_token = self.advance(); // Type token
-        let identifier = self.consume_identifier();
+        let identifier = self.consume_identifier()?;
 
-        self.consume(&Token::Equal); // Expect '='
-        let value = self.expression();
-        self.consume(&Token::Semicolon);
+        self.consume(&Token::Equal)?; // Expect '='
+        let value = self.expression()?;
+        self.consume(&Token::Semicolon)?;
 
-        VarDeclaration {
+        Ok(VarDeclaration {
             is_const,
             type_token,
             identifier,
             value,
-        }
+        })
     }
 
-    fn function_declaration(&mut self) -> FnDeclaration {
+    fn function_declaration(&mut self) -> Result<FnDeclaration, ParserError> {
         let return_type = self.advance(); // Type token
-        let identifier = self.consume_identifier();
+        let identifier = self.consume_identifier()?;
 
         self.consume(&Token::LeftParen);
-        let params = self.parameters();
+        let params = self.parameters()?;
         self.consume(&Token::RightParen);
 
-        let body = self.block();
+        let body = self.block()?;
 
-        FnDeclaration {
+        Ok(FnDeclaration {
             return_type,
             identifier,
             params,
             body,
-        }
+        })
     }
 
-    fn parameters(&mut self) -> Vec<Parameter> {
+    fn parameters(&mut self) -> Result<Vec<Parameter>, ParserError> {
         let mut params = Vec::new();
 
         if !self.check(&Token::RightParen) {
             loop {
-                let type_token = self.consume_type();
-                let identifier = self.consume_identifier();
+                let type_token = self.consume_type()?;
+                let identifier = self.consume_identifier()?;
 
                 params.push(Parameter {
                     type_token,
@@ -150,22 +178,22 @@ impl Parser {
             }
         }
 
-        params
+        Ok(params)
     }
 
-    fn block(&mut self) -> Block {
+    fn block(&mut self) -> Result<Block, ParserError> {
         self.consume(&Token::LeftBrace);
         let mut statements = Vec::new();
 
         while !self.check(&Token::RightBrace) && !self.is_at_end() {
-            statements.push(self.statement());
+            statements.push(self.statement()?);
         }
 
         self.consume(&Token::RightBrace);
-        Block { statements }
+        Ok(Block { statements })
     }
 
-    fn statement(&mut self) -> Statement {
+    fn statement(&mut self) -> Result<Statement, ParserError> {
         if self.match_token(&[Token::If]) {
             self.if_statement()
         } else if self.match_token(&[Token::While]) {
@@ -174,142 +202,111 @@ impl Parser {
             self.return_statement()
         } else if self.match_token(&[Token::Break]) {
             self.consume(&Token::Semicolon);
-            Statement::Break
+            Ok(Statement::Break)
         } else if self.match_token(&[Token::Continue]) {
             self.consume(&Token::Semicolon);
-            Statement::Continue
+            Ok(Statement::Continue)
         } else if self.match_token(&[Token::Print]) {
             self.print_statement()
         } else if self.check(&Token::LeftBrace) {
-            Statement::Block(self.block())
+            Ok(Statement::Block(self.block()?))
         } else if self.check_type_token() {
-            Statement::VarDecl(self.variable_declaration(false))
+            Ok(Statement::VarDecl(self.variable_declaration(false)?))
         } else {
             self.expression_statement()
         }
     }
 
-    /* This version of `if_statement` fails the following test:
-        ```c
-        if (x < 0) return -x;
-        return x;
-        ```
-        because it fails to recognize it as equivalent to
-        ```c
-        if (x < 0) {
-            return -x;
-        } else {
-            return x;
-        }
-        ```
-    */
-    /*fn if_statement(&mut self) -> Statement {
+    fn if_statement(&mut self) -> Result<Statement, ParserError> {
         self.consume(&Token::LeftParen);
-        let condition = self.expression();
+        let condition = self.expression()?;
         self.consume(&Token::RightParen);
 
-        let then_branch = Box::new(self.statement());
-        let else_branch = if self.match_token(&[Token::Else]) {
-            Some(Box::new(self.statement()))
-        } else {
-            None
-        };
-
-        Statement::If(Box::new(condition), then_branch, else_branch)
-    }*/
-
-    /* Meanwhile, this version passes the test
-    ```c
-    if (x < 0) return -x;
-    return x;
-    ```
-    */
-    fn if_statement(&mut self) -> Statement {
-        self.consume(&Token::LeftParen);
-        let condition = self.expression();
-        self.consume(&Token::RightParen);
-
-        let then_branch = Box::new(self.statement());
+        let then_branch = Box::new(self.statement()?);
 
         let else_branch = if self.peek() == Token::Else {
             self.advance(); // consume the 'else' token
-            Some(Box::new(self.statement()))
+            Some(Box::new(self.statement()?))
         } else if !matches!(self.peek(), Token::RightBrace) {
             // if we're not at the end of a block, treat the next statement as an implicit else
-            Some(Box::new(self.statement()))
+            Some(Box::new(self.statement()?))
         } else {
             None
         };
 
-        Statement::If(Box::new(condition), then_branch, else_branch)
+        Ok(Statement::If(Box::new(condition), then_branch, else_branch))
     }
 
-    fn while_statement(&mut self) -> Statement {
-        self.consume(&Token::LeftParen);
-        let condition = self.expression();
-        self.consume(&Token::RightParen);
-        let body = self.statement();
-        Statement::While(Box::new(condition), Box::new(body))
+    fn while_statement(&mut self) -> Result<Statement, ParserError> {
+        self.consume(&Token::LeftParen)?;
+        let condition = self.expression()?;
+        self.consume(&Token::RightParen)?;
+        let body = self.statement()?;
+        Ok(Statement::While(Box::new(condition), Box::new(body)))
     }
 
-    fn return_statement(&mut self) -> Statement {
+    fn return_statement(&mut self) -> Result<Statement, ParserError> {
         let value = if !self.check(&Token::Semicolon) {
-            Some(Box::new(self.expression()))
+            Some(Box::new(self.expression()?))
         } else {
             None
         };
         self.consume(&Token::Semicolon);
-        Statement::Return(value)
+        Ok(Statement::Return(value))
     }
 
-    fn print_statement(&mut self) -> Statement {
+    fn print_statement(&mut self) -> Result<Statement, ParserError> {
         self.consume(&Token::LeftParen);
-        let expr = self.expression();
+        let expr = self.expression()?;
         self.consume(&Token::RightParen);
         self.consume(&Token::Semicolon);
-        Statement::Print(Box::new(expr))
+        Ok(Statement::Print(Box::new(expr)))
     }
 
-    fn expression_statement(&mut self) -> Statement {
-        let expr = self.expression();
+    fn expression_statement(&mut self) -> Result<Statement, ParserError> {
+        let expr = self.expression()?;
         self.consume(&Token::Semicolon);
-        Statement::Expression(expr)
+        Ok(Statement::Expression(expr))
     }
 
-    fn expression(&mut self) -> Expr {
+    fn expression(&mut self) -> Result<Expr, ParserError> {
         self.assignment()
     }
 
-    fn assignment(&mut self) -> Expr {
-        let expr = self.equality();
+    fn assignment(&mut self) -> Result<Expr, ParserError> {
+        let expr = self.equality()?;
 
         if self.match_token(&[Token::Equal]) {
             let equals = self.previous();
-            let value = self.assignment();
+            let value = self.assignment()?;
 
             if let Expr::Variable(name) = expr {
-                return Expr::Binary(Box::new(Expr::Variable(name)), equals, Box::new(value));
+                return Ok(Expr::Binary(
+                    Box::new(Expr::Variable(name)),
+                    equals,
+                    Box::new(value),
+                ));
             }
-            // Error handling could be added here
+            return Err(ParserError::InvalidExpression);
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn equality(&mut self) -> Expr {
-        let mut expr = self.comparison();
+    fn equality(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.comparison()?;
 
         while self.match_token(&[Token::BangEqual, Token::EqualEqual]) {
             let operator = self.previous();
-            let right = self.comparison();
+            let right = self.comparison()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn comparison(&mut self) -> Expr {
-        let mut expr = self.term();
+    fn comparison(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.term()?;
 
         while self.match_token(&[
             Token::Greater,
@@ -318,87 +315,100 @@ impl Parser {
             Token::LessEqual,
         ]) {
             let operator = self.previous();
-            let right = self.term();
+            let right = self.term()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn term(&mut self) -> Expr {
-        let mut expr = self.factor();
+    fn term(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.factor()?;
 
         while self.match_token(&[Token::Plus, Token::Minus]) {
             let operator = self.previous();
-            let right = self.factor();
+            let right = self.factor()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn factor(&mut self) -> Expr {
-        let mut expr = self.unary();
+    fn factor(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.unary()?;
 
         while self.match_token(&[Token::Star, Token::Slash]) {
             let operator = self.previous();
-            let right = self.unary();
+            let right = self.unary()?;
             expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
         }
 
-        expr
+        Ok(expr)
     }
 
-    fn unary(&mut self) -> Expr {
+    fn unary(&mut self) -> Result<Expr, ParserError> {
         if self.match_token(&[Token::Bang, Token::Minus]) {
             let operator = self.previous();
-            let right = self.unary();
-            return Expr::Unary(operator, Box::new(right));
+            let right = self.unary()?;
+            return Ok(Expr::Unary(operator, Box::new(right)));
         }
 
         self.primary()
     }
 
-    fn primary(&mut self) -> Expr {
+    fn primary(&mut self) -> Result<Expr, ParserError> {
         let token = self.peek();
         match token {
             Token::Number(_) | Token::StringLiteral(_) => {
                 self.advance();
-                Expr::Literal(token)
+                Ok(Expr::Literal(token))
             }
             Token::Identifier(_) => {
                 let identifier = self.advance();
                 if self.match_token(&[Token::LeftParen]) {
-                    let args = self.arguments();
+                    let args = self.arguments()?;
                     self.consume(&Token::RightParen);
-                    Expr::Call(Box::new(Expr::Variable(identifier)), args)
+                    Ok(Expr::Call(Box::new(Expr::Variable(identifier)), args))
                 } else {
-                    Expr::Variable(identifier)
+                    Ok(Expr::Variable(identifier))
                 }
             }
             Token::LeftParen => {
                 self.advance();
-                let expr = self.expression();
+                let expr = self.expression()?;
                 self.consume(&Token::RightParen);
-                Expr::Parentheses(Box::new(expr))
+                Ok(Expr::Parentheses(Box::new(expr)))
             }
-            _ => panic!("Expected expression"),
+            _ => Err(ParserError::UnexpectedToken {
+                found: token.clone(),
+                expected: vec![
+                    // Alternative is to define a ExpectedToken enum,
+                    // which is the same as Token except no parameters.
+                    // This way, we won't need to pass placeholder parameters here.
+                    // However, this means that we have to sync ExpectedToken with Token,
+                    // which sounds like too much work for the sake of pretty error messages.
+                    Token::Number(0.0),
+                    Token::StringLiteral(String::from("placeholder")),
+                    Token::Identifier(String::from("placeholder")),
+                    Token::LeftParen,
+                ],
+            }),
         }
     }
 
-    fn arguments(&mut self) -> Vec<Expr> {
+    fn arguments(&mut self) -> Result<Vec<Expr>, ParserError> {
         let mut args = Vec::new();
 
         if !self.check(&Token::RightParen) {
             loop {
-                args.push(self.expression());
+                args.push(self.expression()?);
                 if !self.match_token(&[Token::Comma]) {
                     break;
                 }
             }
         }
 
-        args
+        Ok(args)
     }
 
     // Helper methods
@@ -446,26 +456,46 @@ impl Parser {
         self.tokens[self.current - 1].clone()
     }
 
-    fn consume(&mut self, token: &Token) {
+    fn consume(&mut self, token: &Token) -> Result<(), ParserError> {
         if self.check(token) {
             self.advance();
-            return;
+            return Ok(());
         }
-        panic!("Expected {:?}", token); // Error handling could be improved
+        if self.is_at_end() {
+            return Err(ParserError::UnexpectedEOF {
+                expected: vec![token.clone()],
+            });
+        }
+        Err(ParserError::UnexpectedToken {
+            found: self.peek(),
+            expected: vec![token.clone()],
+        })
     }
 
-    fn consume_identifier(&mut self) -> Token {
+    fn consume_identifier(&mut self) -> Result<Token, ParserError> {
         match &self.peek() {
-            Token::Identifier(_) => self.advance(),
-            _ => panic!("Expected identifier"), // Error handling could be improved
+            Token::Identifier(_) => Ok(self.advance()),
+            _ => Err(ParserError::UnexpectedToken {
+                found: self.peek(),
+                expected: vec![Token::Identifier(String::from("placeholder"))],
+            }),
         }
     }
 
-    fn consume_type(&mut self) -> Token {
+    fn consume_type(&mut self) -> Result<Token, ParserError> {
         if self.check_type_token() {
-            self.advance()
+            Ok(self.advance())
         } else {
-            panic!("Expected type"); // Error handling could be improved
+            Err(ParserError::UnexpectedToken {
+                found: self.peek(),
+                expected: vec![
+                    Token::Int,
+                    Token::Char,
+                    Token::Double,
+                    Token::Void,
+                    Token::Struct,
+                ],
+            })
         }
     }
 
@@ -489,7 +519,7 @@ impl Parser {
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Program {
+pub fn parse(tokens: Vec<Token>) -> Result<Program, ParserError> {
     let mut parser = Parser::new(tokens);
     parser.parse()
 }

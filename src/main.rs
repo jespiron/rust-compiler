@@ -62,9 +62,18 @@ pub fn parse_args() -> Config {
 #[derive(Debug)]
 enum CompileError {
     InvalidCommand {},
-    FileNotFound { filename: String, source: io::Error },
-    ParseError { filename: String, message: String },
-    BinaryFileGenerationError { outpath: String, source: io::Error },
+    FileNotFound {
+        filename: String,
+        source: io::Error,
+    },
+    ParserError {
+        filename: String,
+        source: parser::ParserError,
+    },
+    BinaryFileGenerationError {
+        outpath: String,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for CompileError {
@@ -76,8 +85,8 @@ impl fmt::Display for CompileError {
             CompileError::FileNotFound { filename, source } => {
                 write!(f, "Failed to open file '{}': {}", filename, source)
             }
-            CompileError::ParseError { filename, message } => {
-                write!(f, "Error parsing file '{}': {}", filename, message)
+            CompileError::ParserError { filename, source } => {
+                write!(f, "Error parsing file '{}': {}", filename, source)
             }
             CompileError::BinaryFileGenerationError { outpath, source } => {
                 write!(
@@ -108,7 +117,10 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             })?;
 
             let tokens = lexer::tokenize(file);
-            let program = parser::parse(tokens);
+            let program = parser::parse(tokens).map_err(|e| CompileError::ParserError {
+                filename: filename.to_string(),
+                source: e,
+            })?;
             let ops = codegen::generate_code(program);
 
             // Construct the output path: src_dir/target/filename.o0
@@ -129,11 +141,7 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
                 }
             })?;
 
-            // Placeholder for actual parsing logic
-            Err(CompileError::ParseError {
-                filename: filename.to_string(),
-                message: "Parsing not implemented yet".into(),
-            })
+            Ok(())
         }
     }
 }
