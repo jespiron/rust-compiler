@@ -64,6 +64,7 @@ enum CompileError {
     InvalidCommand {},
     FileNotFound { filename: String, source: io::Error },
     ParseError { filename: String, message: String },
+    BinaryFileGenerationError { outpath: String, source: io::Error },
 }
 
 impl fmt::Display for CompileError {
@@ -77,6 +78,13 @@ impl fmt::Display for CompileError {
             }
             CompileError::ParseError { filename, message } => {
                 write!(f, "Error parsing file '{}': {}", filename, message)
+            }
+            CompileError::BinaryFileGenerationError { outpath, source } => {
+                write!(
+                    f,
+                    "Failed to write binary file to '{}': {}",
+                    outpath, source
+                )
             }
         }
     }
@@ -114,7 +122,12 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             outpath.set_extension("o0");
 
             // Write the output file
-            codegen::to_binary_file(ops, outpath);
+            codegen::to_binary_file(ops, outpath.clone()).map_err(|e| {
+                CompileError::BinaryFileGenerationError {
+                    outpath: outpath.to_string_lossy().into(),
+                    source: e,
+                }
+            })?;
 
             // Placeholder for actual parsing logic
             Err(CompileError::ParseError {
