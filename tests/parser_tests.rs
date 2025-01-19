@@ -23,7 +23,7 @@ mod tests {
             Token::Eof,
         ];
 
-        let program = parse(tokens);
+        let program = parse(tokens).unwrap();
 
         assert_eq!(program.decl.len(), 0);
         assert_eq!(program.fns.len(), 1);
@@ -49,7 +49,7 @@ mod tests {
             Token::Eof,
         ];
 
-        let program = parse(tokens);
+        let program = parse(tokens).unwrap();
 
         assert_eq!(program.decl.len(), 1);
         assert_eq!(program.fns.len(), 0);
@@ -90,7 +90,7 @@ mod tests {
             Token::Eof,
         ];
 
-        let program = parse(tokens);
+        let program = parse(tokens).unwrap();
 
         assert_eq!(program.fns.len(), 1);
 
@@ -134,7 +134,7 @@ mod tests {
             Token::Eof,
         ];
 
-        let program = parse(tokens);
+        let program = parse(tokens).unwrap();
 
         let abs_fn = &program.fns[0];
         assert_eq!(abs_fn.identifier, Token::Identifier("abs".to_string()));
@@ -190,7 +190,7 @@ mod tests {
             Token::Eof,
         ];
 
-        let program = parse(tokens);
+        let program = parse(tokens).unwrap();
 
         let countdown_fn = &program.fns[0];
         assert_eq!(countdown_fn.return_type, Token::Void);
