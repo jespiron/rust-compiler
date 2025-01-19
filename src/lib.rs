@@ -1,3 +1,3 @@
-pub mod lazy_lexer;
+pub mod codegen;
 pub mod lexer;
 pub mod parser;
