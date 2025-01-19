@@ -129,21 +129,90 @@ fn generate_ir(program: Program) -> IR {
 fn process_global_var(ir: &mut IR, var_decl: VarDeclaration) {
     match var_decl.value {
         Expr::Literal(token) => {
-            // Add value to constants if needed
+            // Add value to constants
             let value = parse_literal(&token);
             let const_index = ir.add_constant(value.clone());
 
-            // Generate instruction to load constant
             match value {
+                // For small integers, use Bipush for efficiency
+                // We might be able to do the same for IPush as well
                 Constant::Int(i) if i <= 127 && i >= -128 => {
                     ir.start.push(Op::Bipush(i as u8));
                 }
+                // For other constants, use LoadC
                 _ => {
                     ir.start.push(Op::LoadC(const_index));
                 }
             }
+
+            // Store the value in global storage
+            match var_decl.type_token {
+                Token::Int => ir.start.push(Op::IStore),
+                Token::Double => ir.start.push(Op::DStore),
+                Token::Char => {
+                    ir.start.push(Op::I2C);
+                    ir.start.push(Op::IStore);
+                }
+                _ => panic!("Unsupported global variable type"),
+            }
         }
-        _ => todo!("Handle complex global initializers"),
+        Expr::Binary(left, op, right) => {
+            // Process left and right instructions
+            process_expression(&mut ir.start, *left);
+            process_expression(&mut ir.start, *right);
+
+            // Generate op instruction
+            match op {
+                Token::Plus => ir.start.push(Op::IAdd),
+                Token::Minus => ir.start.push(Op::ISub),
+                Token::Star => ir.start.push(Op::IMul),
+                Token::Slash => ir.start.push(Op::IDiv),
+                _ => panic!("Unsupported binary operator"),
+            }
+
+            // Store the result
+            match var_decl.type_token {
+                Token::Int => ir.start.push(Op::IStore),
+                Token::Double => ir.start.push(Op::DStore),
+                Token::Char => {
+                    ir.start.push(Op::I2C);
+                    ir.start.push(Op::IStore);
+                }
+                _ => panic!("Unsupported global variable type"),
+            }
+        }
+        Expr::Unary(op, expr) => {
+            // Process the expression
+            process_expression(&mut ir.start, *expr);
+
+            // Generate op instruction
+            match op {
+                Token::Minus => ir.start.push(Op::INeg),
+                Token::Bang => {
+                    // For logical not, compare with 0
+                    ir.start.push(Op::Bipush(0));
+                    ir.start.push(Op::ICmp);
+                    ir.start.push(Op::IStore);
+                }
+                _ => panic!("Unsupported unary operator"),
+            }
+        }
+        Expr::Parentheses(expr) => {
+            // Simply process the inner expression
+            process_expression(&mut ir.start, *expr);
+
+            // Store the result
+            match var_decl.type_token {
+                Token::Int => ir.start.push(Op::IStore),
+                Token::Double => ir.start.push(Op::DStore),
+                Token::Char => {
+                    ir.start.push(Op::I2C);
+                    ir.start.push(Op::IStore);
+                }
+                _ => panic!("Unsupported global variable type"),
+            }
+        }
+        _ => panic!("Unsupported global variable initializer"),
     }
 }
 
@@ -184,25 +253,115 @@ fn process_statement(instructions: &mut Vec<Op>, stmt: Statement) {
 
 fn process_expression(instructions: &mut Vec<Op>, expr: Expr) {
     match expr {
-        Expr::Literal(token) => match parse_literal(&token) {
-            Constant::Int(i) if i <= 127 && i >= -128 => {
-                instructions.push(Op::Bipush(i as u8));
+        Expr::Literal(token) => {
+            let value = parse_literal(&token);
+            match value {
+                /*
+                Although the specs put integers in the constants pool,
+                I *think* we can exclude them from the pool,
+                as they're small enough to be handled directly by Bipush or IPush.
+                */
+                Constant::Int(i) if i <= 127 && i >= -128 => {
+                    instructions.push(Op::Bipush(i as u8));
+                }
+                Constant::Int(i) => {
+                    instructions.push(Op::Ipush(i));
+                }
+                // TODO: Implement constants pool
+                /* Constants like doubles and strings are too large and thus must
+                be stored in the constant pool.
+
+                Every time we need a double or string, we need
+                    some way of getting the index of the desired value.
+                From here, we use `LoadC` to load the value from the constant pool
+                */
+                Constant::Double(d) => {
+                    panic!("Double literals not yet supported in expressions");
+                }
+                Constant::String(_) => {
+                    panic!("String literals not yet supported in expressions");
+                }
             }
-            _ => todo!("Handle other literal types"),
-        },
+        }
+        Expr::Binary(left, op, right) => {
+            process_expression(instructions, *left);
+            process_expression(instructions, *right);
+            match op {
+                Token::Plus => instructions.push(Op::IAdd),
+                Token::Minus => instructions.push(Op::ISub),
+                Token::Star => instructions.push(Op::IMul),
+                Token::Slash => instructions.push(Op::IDiv),
+                _ => panic!("Unsupported binary operator"),
+            }
+        }
         Expr::Unary(op, expr) => {
             process_expression(instructions, *expr);
             match op {
                 Token::Minus => instructions.push(Op::INeg),
-                _ => todo!("Handle other unary operators"),
+                Token::Bang => {
+                    instructions.push(Op::Bipush(0));
+                    instructions.push(Op::ICmp);
+                }
+                _ => panic!("Unsupported unary operator"),
             }
         }
-        _ => todo!("Handle other expression types"),
+        Expr::Parentheses(expr) => {
+            process_expression(instructions, *expr);
+        }
+        Expr::Variable(identifier) => {
+            match identifier {
+                Token::Identifier(_) => {
+                    // TODO: Handle globals and use type-specific loads
+                    /*
+                    For now, we assume all variables are integers and local.
+                    In the full implementation, we need to:
+                        - Check if the variable is local or global
+                        - Use the appropriate load instruction based
+                            on type (int, double, char)
+                    */
+                    instructions.push(Op::ILoad);
+                }
+                _ => panic!("Invalid identifier token"),
+            }
+        }
+        Expr::Call(callee, args) => {
+            // First, evaluate all arguments and push them onto the stack
+            for arg in args {
+                process_expression(instructions, arg);
+            }
+
+            // Now handle the callee
+            match *callee {
+                Expr::Variable(Token::Identifier(name)) => {
+                    // TODO: Create symbol table
+                    /*
+                    In the full implementation, we need to:
+                        1. Look up the function from a symbol table to get its index
+                        2. Push the `Call` instruction with the correct function index
+                    Assuming we have the function index, it'll be something like:
+                        instructions.push(Op::Call(function_index));
+                    */
+                    panic!("Need symbol table to resolve function call to {}", name);
+                }
+                _ => panic!("Callee must be a function identifier"),
+            }
+        }
     }
 }
 
-fn parse_literal(_token: &Token) -> Constant {
-    todo!("Implement literal parsing")
+fn parse_literal(token: &Token) -> Constant {
+    match token {
+        Token::Number(n) => {
+            // Check if the number is an integer
+            if n.fract() == 0.0 && *n >= (i32::MIN as f64) && *n <= (i32::MAX as f64) {
+                Constant::Int(*n as i32)
+            } else {
+                Constant::Double(*n)
+            }
+        }
+        Token::StringLiteral(s) => Constant::String(s.clone()),
+        _ => panic!("Unsupported literal type"),
+    }
 }
 
 // Convert IR to final bytecode
