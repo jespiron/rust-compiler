@@ -72,43 +72,12 @@ fn test_sample_program() {
         ],
     };
 
-    let bytecode = generate_code(program);
-
-    // Expected bytecode based on the provided example
-    let expected = vec![
-        // magic
-        0x43, 0x30, 0x3A, 0x29, // version
-        0x00, 0x00, 0x00, 0x01, // constants_count
-        0x00, 0x06, // constants[0]: "fun"
-        0x00, 0x00, 0x03, 0x66, 0x75, 0x6E, // constants[1]: "main"
-        0x00, 0x00, 0x04, 0x6D, 0x61, 0x69, 0x6E, // constants[2]: -123456
-        0x01, 0xFF, 0xFE, 0x1D, 0xC0, // constants[3]: 1.0
-        0x02, 0x3F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // start_code
-        0x00, 0x02, 0x01, 0x2A, // bipush 42
-        0x09, 0x00, 0x03, // loadc 3 (1.0)
-        // functions_count
-        0x00, 0x02, // function[0] (fun)
-        0x00, 0x00, // name_index
-        0x00, 0x01, // params_length
-        0x00, 0x01, // level
-        0x00, 0x04, // instructions_count
-        0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // loada 0,0
-        0x10, // iload
-        0x40, // ineg
-        0x89, // iret
-        // function[1] (main)
-        0x00, 0x01, // name_index
-        0x00, 0x00, // params_length
-        0x00, 0x01, // level
-        0x00, 0x03, // instructions_count
-        0x09, 0x00, 0x02, // loadc 2 (-123456)
-        0x80, 0x00, 0x00, // call 0
-        0x89, // iret
-    ];
+    let found = generate_code(program);
+    let expected = vec![]; // TODO
 
     assert_eq!(
-        bytecode, expected,
+        found, expected,
         "\nExpected bytecode:\n{:02X?}\n\nGot bytecode:\n{:02X?}",
-        expected, bytecode
+        expected, found
     );
 }

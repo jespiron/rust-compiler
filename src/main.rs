@@ -134,7 +134,7 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             outpath.set_extension("S");
 
             // Write the output file
-            codegen::to_binary_file(ops, outpath.clone()).map_err(|e| {
+            codegen::to_file(ops, outpath.clone()).map_err(|e| {
                 CompileError::BinaryFileGenerationError {
                     outpath: outpath.to_string_lossy().into(),
                     source: e,
