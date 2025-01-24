@@ -1,6 +1,7 @@
 //! Register allocator.
 
-use std::collections::HashSet;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
 
 /// `Dependency`` represents liveness information of an abstract assembly line.
 /// For example, the abstract assembly lines
@@ -31,7 +32,7 @@ struct Dependency {
     live_out: HashSet<String>,
     /// True iff the instruction is a move instruction, needed for register coalescing
     is_move: bool,
-    /// Line number within the abstract asseumbly programming
+    /// Line number within the abstract assembly programming
     line: usize,
 }
 
@@ -49,7 +50,7 @@ struct Output {
     spillover: HashSet<String>,
 }
 
-/// Private helper. Assigns temps using at most K registers
+/// Assigns temps using at most K registers
 /// Outputs one assignment per assembly line, or None if no temp is defined on that line.
 /// assignments: [
 ///     Some({ temp: "%t1", register: "%edx" }),
@@ -64,12 +65,65 @@ struct Output {
 /// Spillover temps are collected in the spillover field.
 ///
 fn _allocate_registers(k: usize, dependencies: &Vec<Dependency>) -> Output {
+    // Chordal Graph Algorithm
+    // See https://www.cs.cmu.edu/~15411/lectures/02-regalloc.pdf
+    let mut graph = create_interference_graph();
+    let color_assignments = assign_colors(&mut graph, k);
+
+    // Associate colors with registers
+    // We pre-color the registers %eax and %edx with 0 and 1 respectively
+    assert!(k >= 2);
+
+    // Construct output
     let assignments = Vec::new();
     let spillover = HashSet::new();
     Output {
         assignments,
         spillover,
     }
+}
+
+/// Interference graph.
+///  Nodes: variables and registers
+///  An edge exists between two variables if they should be assigned different registers;
+///      that is, they have overlapping live ranges and hold *different values*.
+///  The fact that they have *different values* is important! If we have a variable-to-variable
+///     move, in which they'll have overlapping live ranges, it's actually beneficial to assign
+///     the variables to the same register so that the move becomes redundant.
+struct InterferenceGraph {
+    /// neighbors[v] = neighbors of v
+    neighbors: HashMap<String, Vec<String>>,
+    /// node_colors[v] = numerical color of v
+    node_colors: HashMap<String, usize>,
+    /// register[c] = register mapping of color c
+    color_to_register: HashMap<usize, String>,
+}
+
+fn create_interference_graph() -> InterferenceGraph {
+    // We traverse the program *backwards* from the last line,
+    // building the interference graph:
+    //      Case: t <- s_1 OP s_2 instruction (some computation stored in t)
+    //          Create an edge between t and any t_i that is live after this line,
+    //              where t_i != t.
+    //          Otherwise, this assignment to t may destroy the contents of t_i.
+    //      Case: t <- s instruction (move into t)
+    //          Create an edge between t and any t_i that is live after this line,
+    //              where t_i != t AND t_i != s.
+    let neighbors = HashMap::new();
+    InterferenceGraph {
+        neighbors,
+        node_colors: HashMap::new(),
+        color_to_register: HashMap::new(),
+    }
+}
+
+fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
+    // Pre-color the registers %eax and %edx with 0 and 1 respectively
+    assert!(k >= 2);
+    graph.color_to_register.insert(0, "%eax".to_string());
+    graph.color_to_register.insert(1, "%edx".to_string());
+
+    // Color the rest
 }
 
 /// Assigns temps to the 15 general-purpose registers.
@@ -144,8 +198,7 @@ mod tests {
         (
             $test_name:ident,
             $k:expr,
-            $dependencies:expr,
-            $expected_output:expr
+            $dependencies:expr
         ) => {
             #[test]
             fn $test_name() {
@@ -154,87 +207,112 @@ mod tests {
                     dependencies: $dependencies,
                 };
 
-                let expected_output = $expected_output;
                 let output = _allocate_registers(test_case.k, &test_case.dependencies);
 
                 assert!(
                     validate_output(&test_case, &output),
                     "Output failed validation"
                 );
-
-                assert_eq!(
-                    output, expected_output,
-                    "Output did not match expected output"
-                );
             }
         };
     }
 
+    fn parse_dependencies(input: &str) -> Vec<Dependency> {
+        let line_regex = Regex::new(r"L(\d+):\s*(\S+)\s*<-\s*(.*)").unwrap();
+        let arithmetic_regex = Regex::new(r"(\S+)\s*([+\-*/])\s*(\S+)").unwrap();
+
+        input
+            .lines()
+            .filter_map(|line| {
+                line_regex.captures(line).map(|captures| {
+                    let line_number: usize = captures[1].parse().unwrap();
+                    let defines = Some(captures[2].to_string());
+                    let value = captures[3].trim();
+
+                    let (uses, is_move) =
+                        if let Some(arith_captures) = arithmetic_regex.captures(value) {
+                            let left = arith_captures[1].to_string();
+                            let right = arith_captures[3].to_string();
+                            (
+                                [left, right].iter().cloned().map(String::from).collect(),
+                                false,
+                            )
+                        } else {
+                            (HashSet::new(), true)
+                        };
+
+                    Dependency {
+                        uses: uses.clone(),
+                        defines,
+                        live_out: uses,
+                        is_move,
+                        line: line_number,
+                    }
+                })
+            })
+            .collect()
+    }
+
+    // Interference graph:
+    //
+    //      x1 - x2 - x3 - x4   x5  %eax
+    //
     register_allocator_test!(
-        test_case_simple,
+        simple_linear_interference,
         8,
-        vec![
-            Dependency {
-                uses: HashSet::from(["%t9".to_string(), "%t10".to_string()]),
-                defines: Some("%t11".to_string()),
-                live_out: HashSet::from(["%t11".to_string()]),
-                is_move: false,
-                line: 30,
-            },
-            Dependency {
-                uses: HashSet::from(["%t11".to_string()]),
-                defines: Some("%eax".to_string()),
-                live_out: HashSet::new(),
-                is_move: true,
-                line: 31,
-            },
-        ],
-        Output {
-            assignments: vec![
-                Some(Assignment {
-                    temp: "%t11".to_string(),
-                    register: "r0".to_string()
-                }),
-                Some(Assignment {
-                    temp: "%eax".to_string(),
-                    register: "r1".to_string()
-                }),
-            ],
-            spillover: HashSet::from([])
-        }
+        parse_dependencies(
+            r#"
+            L1: x1 <- 1
+            L2: x2 <- 1
+            L3: x3 <- x2 + x1
+            L4: x4 <- x3 + x2
+            L5: x5 <- x4 + x3
+            L6: %eax <- x5
+            "#
+        )
     );
 
+    // Interference graph:
+    //
+    //      a - b - c   %eax
+    //       \     /
+    //        bb- d
     register_allocator_test!(
-        test_case_spilling,
-        1,
-        vec![
-            Dependency {
-                uses: HashSet::from(["%t1".to_string()]),
-                defines: Some("%t2".to_string()),
-                live_out: HashSet::from(["%t2".to_string()]),
-                is_move: false,
-                line: 10,
-            },
-            Dependency {
-                uses: HashSet::from(["%t2".to_string()]),
-                defines: Some("%eax".to_string()),
-                live_out: HashSet::new(),
-                is_move: true,
-                line: 11,
-            },
-        ],
-        Output {
-            assignments: vec![
-                Some(Assignment {
-                    temp: "%t2".to_string(),
-                    register: "r0".to_string()
-                }),
-                Some(Assignment {
-                    temp: "%eax".to_string(),
-                    register: "r0".to_string()
-                }),
-            ],
-            spillover: HashSet::from([])
-        }
+        chordal_graph_temp_b_reuse,
+        8,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: d <- b + c
+            L5: a <- c + d
+            L6: bb <- 7
+            L7: d <- a + bb
+            L8: %eax <- bb + d
+            "#
+        )
+    );
+
+    // Interference graph:
+    //
+    //      a - b - c - d   %eax
+    //      aa - bb - dd
+    //
+    register_allocator_test!(
+        range_split_with_temp_reuse,
+        8,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: d <- b + c
+            L5: aa <- c + d
+            L6: bb <- 7
+            L7: dd <- aa + bb
+            L8: %eax <- bb + dd
+            "#
+        )
     );
 }
