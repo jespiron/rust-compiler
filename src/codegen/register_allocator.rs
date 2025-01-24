@@ -67,16 +67,45 @@ struct Output {
 fn _allocate_registers(k: usize, dependencies: &Vec<Dependency>) -> Output {
     // Chordal Graph Algorithm
     // See https://www.cs.cmu.edu/~15411/lectures/02-regalloc.pdf
-    let mut graph = create_interference_graph();
-    let color_assignments = assign_colors(&mut graph, k);
+    let mut graph = create_interference_graph(dependencies);
 
-    // Associate colors with registers
-    // We pre-color the registers %eax and %edx with 0 and 1 respectively
-    assert!(k >= 2);
+    // "don't mess with %rsp"
+    static COLOR_TO_REGISTER: [&str; 15] = [
+        "%eax", "%edx", "%ebx", "%ecx", "%esi", "%edi", "%ebp", "%r8", "%r9", "%r10", "%r11",
+        "%r12", "%r13", "%r14", "%r15",
+    ];
+    assign_colors(&mut graph, k);
 
     // Construct output
-    let assignments = Vec::new();
-    let spillover = HashSet::new();
+    let mut assignments = Vec::new();
+    let mut spillover = HashSet::new();
+
+    for dependency in dependencies.iter() {
+        if let Some(temp) = &dependency.defines {
+            // Check if the temp has a valid color assigned
+            if let Some(color) = graph.node_colors.get(temp) {
+                // If the color is present, try to find the corresponding register
+                if *color < k {
+                    let register = COLOR_TO_REGISTER[*color];
+                    assignments.push(Some(Assignment {
+                        temp: temp.clone(),
+                        register: register.to_string(),
+                    }));
+                } else {
+                    // Handle case where there is no register for the color
+                    spillover.insert(temp.clone());
+                    assignments.push(None);
+                }
+            } else {
+                // No color found for the temp, spillover
+                spillover.insert(temp.clone());
+                assignments.push(None);
+            }
+        } else {
+            assignments.push(None);
+        }
+    }
+
     Output {
         assignments,
         spillover,
@@ -95,11 +124,9 @@ struct InterferenceGraph {
     neighbors: HashMap<String, Vec<String>>,
     /// node_colors[v] = numerical color of v
     node_colors: HashMap<String, usize>,
-    /// register[c] = register mapping of color c
-    color_to_register: HashMap<usize, String>,
 }
 
-fn create_interference_graph() -> InterferenceGraph {
+fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGraph {
     // We traverse the program *backwards* from the last line,
     // building the interference graph:
     //      Case: t <- s_1 OP s_2 instruction (some computation stored in t)
@@ -109,21 +136,66 @@ fn create_interference_graph() -> InterferenceGraph {
     //      Case: t <- s instruction (move into t)
     //          Create an edge between t and any t_i that is live after this line,
     //              where t_i != t AND t_i != s.
-    let neighbors = HashMap::new();
+    let mut neighbors: HashMap<String, Vec<String>> = HashMap::new();
+
+    // Traverse dependencies and build the interference graph
+    for dep in dependencies.iter().rev() {
+        if let Some(temp) = &dep.defines {
+            // For each temp defined on this line, create edges with live-out temps
+            for live_temp in dep.live_out.iter() {
+                if live_temp != temp {
+                    neighbors
+                        .entry(temp.clone())
+                        .or_insert_with(Vec::new)
+                        .push(live_temp.clone());
+                    neighbors
+                        .entry(live_temp.clone())
+                        .or_insert_with(Vec::new)
+                        .push(temp.clone());
+                }
+            }
+        }
+    }
+
     InterferenceGraph {
         neighbors,
         node_colors: HashMap::new(),
-        color_to_register: HashMap::new(),
     }
 }
 
 fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
     // Pre-color the registers %eax and %edx with 0 and 1 respectively
     assert!(k >= 2);
-    graph.color_to_register.insert(0, "%eax".to_string());
-    graph.color_to_register.insert(1, "%edx".to_string());
+    graph.node_colors.insert("%eax".to_string(), 0);
+    graph.node_colors.insert("%edx".to_string(), 1);
 
-    // Color the rest
+    // Color the rest with greedy approach
+    for temp in graph.neighbors.keys() {
+        // Check the colors of neighboring nodes
+        let mut used_colors = HashSet::new();
+        if let Some(neighbors) = graph.neighbors.get(temp) {
+            for neighbor in neighbors {
+                if let Some(color) = graph.node_colors.get(neighbor) {
+                    used_colors.insert(*color);
+                }
+            }
+        }
+
+        // Find the first color that is not used by neighbors
+        // This smells like a Leetcode problem but I don't feel like writing the O(1) space solution
+        let mut color = 2;
+        while used_colors.contains(&color) {
+            color += 1;
+        }
+
+        if color < k {
+            graph.node_colors.insert(temp.clone(), color);
+        } else {
+            // Spillover, no colors available for this temp
+            // Designate k as the "spillover" color
+            graph.node_colors.insert(temp.clone(), k);
+        }
+    }
 }
 
 /// Assigns temps to the 15 general-purpose registers.
@@ -160,23 +232,29 @@ mod tests {
     3. No more than K registers are used
     */
     fn validate_output(input: &TestCase, output: &Output) -> bool {
-        let mut defined_registers: HashSet<String> = HashSet::new();
+        let mut defined_registers: HashMap<String, String> = HashMap::new();
 
         for (i, dependency) in input.dependencies.iter().enumerate() {
             // Make sure all defined temps are assigned
             if let Some(temp) = &dependency.defines {
                 if let Some(assignment) = &output.assignments[i] {
+                    println!("{} -> {}", assignment.temp, assignment.register);
                     assert!(&assignment.temp == temp);
 
-                    // Register conflict detected
+                    // Check for register conflicts
                     let assigned_register = &assignment.register;
-                    if defined_registers.contains(assigned_register) {
-                        return false;
+                    for used in &dependency.uses {
+                        if let Some(used_register) = defined_registers.get(used) {
+                            if used_register == assigned_register {
+                                return false;
+                            }
+                        }
                     }
 
-                    defined_registers.insert(assigned_register.clone());
+                    defined_registers.insert(temp.clone(), assigned_register.clone());
                 } else {
                     // Temp not assigned to any register
+                    println!("FAIL, {} not found", temp);
                     return false;
                 }
             }
@@ -185,9 +263,6 @@ mod tests {
             if defined_registers.len() > input.k {
                 return false;
             }
-
-            // Update live-out info
-            // TODO: read slides on live-out
         }
 
         true
@@ -240,7 +315,11 @@ mod tests {
                         } else {
                             (HashSet::new(), true)
                         };
-
+                    println!(
+                        "L{}: defines {}",
+                        line_number,
+                        defines.clone().unwrap_or_else(|| "None".to_string())
+                    );
                     Dependency {
                         uses: uses.clone(),
                         defines,
