@@ -27,7 +27,7 @@ struct Dependency {
     uses: HashSet<String>,
     /// Denotes the temp or register defined on this line
     defines: Option<String>,
-    /// Denotes live-out temps on this line, deriable from used and defined sets
+    /// Denotes live-out temps on this line, derivable from used and defined sets
     live_out: HashSet<String>,
     /// True iff the instruction is a move instruction, needed for register coalescing
     is_move: bool,
