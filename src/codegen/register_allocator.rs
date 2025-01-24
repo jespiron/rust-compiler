@@ -1,74 +1,32 @@
 //! Register allocator.
-/*
-Each input file has the JSON format of the form
-```
-//target 8
-[
-...
-{
-"Uses": [ "%t9", "%t10" ],
-"Defines": [ "%t11" ],
-"Live_out": [ "%t11" ],
-"Move": false,
-"Line": 30,
-},
-{
-"Uses": [ "%t11" ],
-"Defines": [ "%eax" ],
-"Live_out": [],
-"Move": true,
-"Line": 31,
-},
-1
-...
-]
-```
 
-The first line of the input file is a directive //target k, meaning that your compiler should use at
-most k registers in register allocation to receive points for this input. The rest of the input file is a
-JSON list of JSON objects. The ith object in the list represents the liveness information of the ith
-abstract assembly line. For example, the two objects above correspond to the abstract assembly
-lines below:
-%t11 <-- %t9 * %t10
-%eax <--%t11
-
-Here is a breakdown of what the fields in each object means:
-
-
-[
-{ "%t1": "%edx" },
-{ "%t2": "%edx" },
-{ "%t3": "%eax" },
-{},
-...
-]
-
-The output is also a JSON list of JSON objects. The ith object in the list must correspond to the
-ith abstract assembly line. There is at most one temp defined on an abstract assembly line, and the
-2
-corresponding JSON object in your output should map this defined temp to the register allocated
-for this temp. If no temp is defined on an abstract assembly line, the corresponding JSON object
-should be an empty JSON object, as shown above.
-
-The reason we don’t ask you to output a single mapping from each temp to the register allocated
-for that temp is we wanted to be flexible. If there are multiple definitions of the same temp, some
-register allocator implementations might map each definition to a different register. That being
-said, the reference compiler used to generate the input files implements SSA, so all temps have a
-unique definition within the input files we provide you.
-*/
-
-use super::x86_encoding::Register;
 use std::collections::HashSet;
 
 /// `Dependency`` represents liveness information of an abstract assembly line.
-/// For example, the
-/// Temps and registers are represented by %t[1-9][0-9]*
+/// For example, the abstract assembly lines
+///     %t11 <-- %t9 * %t10
+///     %eax <--%t11
+/// would correspond to the following:
+///     Dependency {
+///         uses: [ "%t9", "%t10" ],
+///         defines: [ "%t11" ],
+///         live_out: [ "%t11" ],
+///         move: false,
+///         line: 30,
+///     },
+///     Dependency {
+///         uses: [ "%t11" ],
+///         defines: [ "%eax" ],
+///         live_out: [],
+///         is_move: true,
+///         line: 31,
+///     }
 #[derive(Debug)]
 struct Dependency {
     /// Denotes the temps used on this line
-    used: HashSet<String>,
+    uses: HashSet<String>,
     /// Denotes the temp or register defined on this line
-    defined: Option<String>,
+    defines: Option<String>,
     /// Denotes live-out temps on this line, deriable from used and defined sets
     live_out: HashSet<String>,
     /// True iff the instruction is a move instruction, needed for register coalescing
@@ -85,19 +43,51 @@ struct Assignment {
 
 #[derive(Debug, PartialEq)]
 struct Output {
+    /// Register assignment for the temp that was defined on the line, if any
     assignments: Vec<Option<Assignment>>,
+    /// Temps that were not assigned a register
+    spillover: HashSet<String>,
 }
 
-/// Private helper. Allocates
+/// Private helper. Assigns temps using at most K registers
+/// Outputs one assignment per assembly line, or None if no temp is defined on that line.
+/// assignments: [
+///     Some({ temp: "%t1", register: "%edx" }),
+///     Some({ temp: "%t2", register: "%edx" }),
+///     Some({ temp: "%t3", register: "%eax" }),
+///     None,
+///     ...
+/// ]
+///
+/// If it does not find an assignment that uses at most K registers, it will assign as many
+/// temps as possible to K registers. The remaining temps will be spilled over to the stack.
+/// Spillover temps are collected in the spillover field.
+///
 fn _allocate_registers(k: usize, dependencies: &Vec<Dependency>) -> Output {
     let assignments = Vec::new();
-    Output { assignments }
+    let spillover = HashSet::new();
+    Output {
+        assignments,
+        spillover,
+    }
 }
 
+/// Assigns temps to the 15 general-purpose registers.
+/// Precondition: `dependencies` already hardcodes usage of the %eax and %edx registers
+///  for assembly lines that use the `ret` and `idiv` instructions. To explain, %eax and $edx
+/// are special for these instructions, as %eax holds the return value, while %edx
+/// holds the remainder when division is done.
 pub fn allocate_registers(dependencies: &Vec<Dependency>) -> Output {
-    Output {
-        assignments: vec![],
+    // First, look for an assignment that uses all 15 general-purpose registers
+    let mut output = _allocate_registers(15, dependencies);
+
+    // If spillover exists, then we *reserve one* register for moving temps to and from the stack.
+    // Hence, we look for an assignment that uses 14 general-purpose registers.
+    if !output.spillover.is_empty() {
+        output = _allocate_registers(14, dependencies);
     }
+
+    output
 }
 
 #[cfg(test)]
@@ -120,7 +110,7 @@ mod tests {
 
         for (i, dependency) in input.dependencies.iter().enumerate() {
             // Make sure all defined temps are assigned
-            if let Some(temp) = &dependency.defined {
+            if let Some(temp) = &dependency.defines {
                 if let Some(assignment) = &output.assignments[i] {
                     assert!(&assignment.temp == temp);
 
@@ -185,15 +175,15 @@ mod tests {
         8,
         vec![
             Dependency {
-                used: HashSet::from(["%t9".to_string(), "%t10".to_string()]),
-                defined: Some("%t11".to_string()),
+                uses: HashSet::from(["%t9".to_string(), "%t10".to_string()]),
+                defines: Some("%t11".to_string()),
                 live_out: HashSet::from(["%t11".to_string()]),
                 is_move: false,
                 line: 30,
             },
             Dependency {
-                used: HashSet::from(["%t11".to_string()]),
-                defined: Some("%eax".to_string()),
+                uses: HashSet::from(["%t11".to_string()]),
+                defines: Some("%eax".to_string()),
                 live_out: HashSet::new(),
                 is_move: true,
                 line: 31,
@@ -209,7 +199,8 @@ mod tests {
                     temp: "%eax".to_string(),
                     register: "r1".to_string()
                 }),
-            ]
+            ],
+            spillover: HashSet::from([])
         }
     );
 
@@ -218,15 +209,15 @@ mod tests {
         1,
         vec![
             Dependency {
-                used: HashSet::from(["%t1".to_string()]),
-                defined: Some("%t2".to_string()),
+                uses: HashSet::from(["%t1".to_string()]),
+                defines: Some("%t2".to_string()),
                 live_out: HashSet::from(["%t2".to_string()]),
                 is_move: false,
                 line: 10,
             },
             Dependency {
-                used: HashSet::from(["%t2".to_string()]),
-                defined: Some("%eax".to_string()),
+                uses: HashSet::from(["%t2".to_string()]),
+                defines: Some("%eax".to_string()),
                 live_out: HashSet::new(),
                 is_move: true,
                 line: 11,
@@ -242,7 +233,8 @@ mod tests {
                     temp: "%eax".to_string(),
                     register: "r0".to_string()
                 }),
-            ]
+            ],
+            spillover: HashSet::from([])
         }
     );
 }
