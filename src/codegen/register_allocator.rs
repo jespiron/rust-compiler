@@ -121,7 +121,7 @@ fn _allocate_registers(k: usize, dependencies: &Vec<Dependency>) -> Output {
 ///     the variables to the same register so that the move becomes redundant.
 struct InterferenceGraph {
     /// neighbors[v] = neighbors of v
-    neighbors: HashMap<String, Vec<String>>,
+    neighbors: HashMap<String, HashSet<String>>,
     /// node_colors[v] = numerical color of v
     node_colors: HashMap<String, usize>,
 }
@@ -136,7 +136,7 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
     //      Case: t <- s instruction (move into t)
     //          Create an edge between t and any t_i that is live after this line,
     //              where t_i != t AND t_i != s.
-    let mut neighbors: HashMap<String, Vec<String>> = HashMap::new();
+    let mut neighbors: HashMap<String, HashSet<String>> = HashMap::new();
 
     // Traverse dependencies and build the interference graph
     for dep in dependencies.iter().rev() {
@@ -146,16 +146,18 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
                 if live_temp != temp {
                     neighbors
                         .entry(temp.clone())
-                        .or_insert_with(Vec::new)
-                        .push(live_temp.clone());
+                        .or_insert_with(HashSet::new)
+                        .insert(live_temp.clone());
                     neighbors
                         .entry(live_temp.clone())
-                        .or_insert_with(Vec::new)
-                        .push(temp.clone());
+                        .or_insert_with(HashSet::new)
+                        .insert(temp.clone());
                 }
             }
         }
     }
+
+    println!("Neighbors: {:?}", neighbors);
 
     InterferenceGraph {
         neighbors,
@@ -292,11 +294,29 @@ mod tests {
         };
     }
 
+    // TODO: write tests
+    fn compute_live_out(dependencies: &Vec<Dependency>) -> Vec<HashSet<String>> {
+        let mut live_out = vec![HashSet::new(); dependencies.len()];
+        let mut global_live_set = HashSet::new();
+
+        for (i, dep) in dependencies.iter().enumerate().rev() {
+            let mut current_live_set = global_live_set.clone();
+            current_live_set.extend(dep.uses.clone());
+            if let Some(defined_temp) = &dep.defines {
+                current_live_set.remove(defined_temp);
+            }
+            live_out[i] = current_live_set.clone();
+            global_live_set = current_live_set;
+        }
+
+        live_out
+    }
+
     fn parse_dependencies(input: &str) -> Vec<Dependency> {
         let line_regex = Regex::new(r"L(\d+):\s*(\S+)\s*<-\s*(.*)").unwrap();
         let arithmetic_regex = Regex::new(r"(\S+)\s*([+\-*/])\s*(\S+)").unwrap();
 
-        input
+        let mut raw_dependencies: Vec<Dependency> = input
             .lines()
             .filter_map(|line| {
                 line_regex.captures(line).map(|captures| {
@@ -308,26 +328,49 @@ mod tests {
                         if let Some(arith_captures) = arithmetic_regex.captures(value) {
                             let left = arith_captures[1].to_string();
                             let right = arith_captures[3].to_string();
-                            (
-                                [left, right].iter().cloned().map(String::from).collect(),
-                                false,
-                            )
+
+                            let mut uses = HashSet::new();
+                            if !left.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                uses.insert(left);
+                            }
+                            if !right.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                uses.insert(right);
+                            }
+
+                            (uses, false)
                         } else {
-                            (HashSet::new(), true)
+                            // Simple move or constant assignment
+                            let uses = if !value.is_empty() {
+                                [value.to_string()].iter().cloned().collect()
+                            } else {
+                                HashSet::new()
+                            };
+                            (uses, true)
                         };
-                    println!(
-                        "L{}: defines {}",
-                        line_number,
-                        defines.clone().unwrap_or_else(|| "None".to_string())
-                    );
+
                     Dependency {
                         uses: uses.clone(),
                         defines,
-                        live_out: uses,
+                        live_out: HashSet::new(), // Placeholder
                         is_move,
                         line: line_number,
                     }
                 })
+            })
+            .collect();
+
+        // Compute accurate live-out sets
+        let live_out_sets = compute_live_out(&raw_dependencies);
+
+        raw_dependencies
+            .iter_mut()
+            .zip(live_out_sets)
+            .map(|(dep, live_out)| Dependency {
+                uses: dep.uses.clone(),
+                defines: dep.defines.clone(),
+                live_out,
+                is_move: dep.is_move,
+                line: dep.line,
             })
             .collect()
     }
@@ -391,6 +434,91 @@ mod tests {
             L6: bb <- 7
             L7: dd <- aa + bb
             L8: %eax <- bb + dd
+            "#
+        )
+    );
+
+    register_allocator_test!(
+        disconnected_graph_allocation,
+        8,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: x <- 2
+            L5: y <- 3
+            L6: z <- x + y
+            L7: %eax <- c + z
+            "#
+        )
+    );
+
+    // NOTE: This should use less registers
+    register_allocator_test!(
+        high_pressure_register_allocation,
+        9,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: d <- b + c
+            L5: e <- c + d
+            L6: f <- d + e
+            L7: g <- e + f
+            L8: h <- f + g
+            L9: %eax <- g + h
+            "#
+        )
+    );
+
+    // NOTE: This also should use less registers
+    register_allocator_test!(
+        move_coalescing_scenario,
+        8,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- a
+            L3: c <- b + 1
+            L4: d <- b + c
+            L5: e <- c + d
+            L6: f <- d + e
+            L7: %eax <- f
+            "#
+        )
+    );
+
+    register_allocator_test!(
+        spillover_limited_registers,
+        9,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: d <- b + c
+            L5: e <- c + d
+            L6: f <- d + e
+            L7: g <- e + f
+            L8: h <- f + g
+            L9: %eax <- h
+            "#
+        )
+    );
+
+    register_allocator_test!(
+        triangular_interference,
+        8,
+        parse_dependencies(
+            r#"
+            L1: a <- 0
+            L2: b <- 1
+            L3: c <- a + b
+            L4: d <- b + c
+            L5: e <- a + d
+            L6: %eax <- e + c
             "#
         )
     );
