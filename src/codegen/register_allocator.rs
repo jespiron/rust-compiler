@@ -4,6 +4,14 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 /// `Dependency`` represents liveness information of an abstract assembly line.
+///
+/// For a given assembly line,
+///     live_out: variables that are live (i.e. needed for future instructions) at the _end_ of the instruction
+///         live_out = UNION of live_in(successors)
+///     live_in: variables that are live _before_ the instruction is executed
+///         live_in = (live_out MINUS defined_vars) UNION used_vars
+///     
+///
 /// For example, the abstract assembly lines
 ///     %t11 <-- %t9 * %t10
 ///     %eax <--%t11
@@ -22,14 +30,17 @@ use std::collections::{HashMap, HashSet};
 ///         is_move: true,
 ///         line: 31,
 ///     }
+///
 #[derive(Debug)]
 struct Dependency {
     /// Denotes the temps used on this line
     uses: HashSet<String>,
     /// Denotes the temp or register defined on this line
     defines: Option<String>,
-    /// Denotes live-out temps on this line, derivable from used and defined sets
+    /// Denotes live-out temps on this line, derivable from uses and defines sets
     live_out: HashSet<String>,
+    /// Denotes live-in temps on this line, derivable from live_out, uses, and defines
+    live_in: HashSet<String>,
     /// True iff the instruction is a move instruction, needed for register coalescing
     is_move: bool,
     /// Line number within the abstract assembly programming
@@ -127,23 +138,28 @@ struct InterferenceGraph {
 }
 
 fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGraph {
-    // We traverse the program *backwards* from the last line,
-    // building the interference graph:
-    //      Case: t <- s_1 OP s_2 instruction (some computation stored in t)
-    //          Create an edge between t and any t_i that is live after this line,
-    //              where t_i != t.
-    //          Otherwise, this assignment to t may destroy the contents of t_i.
-    //      Case: t <- s instruction (move into t)
-    //          Create an edge between t and any t_i that is live after this line,
-    //              where t_i != t AND t_i != s.
+    // The adjacency list of our interference graph
     let mut neighbors: HashMap<String, HashSet<String>> = HashMap::new();
 
-    // Traverse dependencies and build the interference graph
+    // Traverse program *backwards* from the last line
     for dep in dependencies.iter().rev() {
         if let Some(temp) = &dep.defines {
-            // For each temp defined on this line, create edges with live-out temps
+            // Case 1: t <- s_1 OP s_2 instruction (some computation stored in t)
+            //         Create an edge between t and any t_i that is live after this line,
+            //         where t_i != t.
+            let mut criteria = HashSet::from([temp]);
+
+            // Case 2: t <- s instruction (move into t)
+            //         Create an edge between t and any t_i that is live after this line,
+            //         where t_i != t AND t_i != s.
+            if dep.is_move {
+                assert!(dep.uses.len() == 1);
+                criteria.insert(dep.uses.iter().next().unwrap());
+            }
+
+            // For each live-in of successors
             for live_temp in dep.live_out.iter() {
-                if live_temp != temp {
+                if !criteria.contains(live_temp) {
                     neighbors
                         .entry(temp.clone())
                         .or_insert_with(HashSet::new)
@@ -294,22 +310,47 @@ mod tests {
         };
     }
 
-    // TODO: write tests
-    fn compute_live_out(dependencies: &Vec<Dependency>) -> Vec<HashSet<String>> {
+    fn compute_liveness(dependencies: &mut Vec<Dependency>) {
+        // Initialize `live_out` and `live_in` sets for all lines
         let mut live_out = vec![HashSet::new(); dependencies.len()];
-        let mut global_live_set = HashSet::new();
+        let mut live_in = vec![HashSet::new(); dependencies.len()];
 
-        for (i, dep) in dependencies.iter().enumerate().rev() {
-            let mut current_live_set = global_live_set.clone();
-            current_live_set.extend(dep.uses.clone());
-            if let Some(defined_temp) = &dep.defines {
-                current_live_set.remove(defined_temp);
+        let mut has_changed = true;
+        while has_changed {
+            has_changed = false;
+
+            // Iterate in reverse (backward pass through the assembly lines)
+            for i in (0..dependencies.len()).rev() {
+                let dep = &dependencies[i];
+
+                // Compute `live_in`: used_vars ∪ (live_out - defined_vars)
+                let mut current_live_in = dep.uses.clone();
+                for temp in &live_out[i] {
+                    if dep.defines.as_ref() != Some(temp) {
+                        current_live_in.insert(temp.clone());
+                    }
+                }
+
+                // Compute `live_out`: union of live_in from all successors
+                let mut current_live_out = HashSet::new();
+                if i + 1 < dependencies.len() {
+                    current_live_out = live_in[i + 1].clone();
+                }
+
+                // Check if either `live_in` or `live_out` changed
+                if live_in[i] != current_live_in || live_out[i] != current_live_out {
+                    has_changed = true;
+                    live_in[i] = current_live_in;
+                    live_out[i] = current_live_out;
+                }
             }
-            live_out[i] = current_live_set.clone();
-            global_live_set = current_live_set;
         }
 
-        live_out
+        // Update the dependencies with computed liveness information
+        for (i, dep) in dependencies.iter_mut().enumerate() {
+            dep.live_in = live_in[i].clone();
+            dep.live_out = live_out[i].clone();
+        }
     }
 
     fn parse_dependencies(input: &str) -> Vec<Dependency> {
@@ -352,6 +393,7 @@ mod tests {
                         uses: uses.clone(),
                         defines,
                         live_out: HashSet::new(), // Placeholder
+                        live_in: HashSet::new(),  // Placeholder
                         is_move,
                         line: line_number,
                     }
@@ -359,20 +401,9 @@ mod tests {
             })
             .collect();
 
-        // Compute accurate live-out sets
-        let live_out_sets = compute_live_out(&raw_dependencies);
-
+        // Compute liveness
+        compute_liveness(&mut raw_dependencies);
         raw_dependencies
-            .iter_mut()
-            .zip(live_out_sets)
-            .map(|(dep, live_out)| Dependency {
-                uses: dep.uses.clone(),
-                defines: dep.defines.clone(),
-                live_out,
-                is_move: dep.is_move,
-                line: dep.line,
-            })
-            .collect()
     }
 
     // Interference graph:
