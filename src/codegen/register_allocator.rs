@@ -261,10 +261,10 @@ mod tests {
 
                     // Check for register conflicts
                     let assigned_register = &assignment.register;
-                    for used in &dependency.uses {
-                        if let Some(used_register) = defined_registers.get(used) {
-                            if used_register == assigned_register {
-                                return false;
+                    for live_temp in &dependency.live_out {
+                        if let Some(live_register) = defined_registers.get(live_temp) {
+                            if live_register == assigned_register {
+                                return false; // Conflict: Two live temps share the same register
                             }
                         }
                     }
