@@ -189,8 +189,13 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
 fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
     // Pre-color the registers %eax and %edx with 0 and 1 respectively
     assert!(k >= 2);
-    graph.node_colors.insert("%eax".to_string(), 0);
-    graph.node_colors.insert("%edx".to_string(), 1);
+    if graph.neighbors.contains_key("%eax") {
+        graph.node_colors.insert("%eax".to_string(), 0);
+    }
+
+    if graph.neighbors.contains_key("%edx") {
+        graph.node_colors.insert("%edx".to_string(), 1);
+    }
 
     // Color the rest with greedy approach
     for temp in graph.neighbors.keys() {
@@ -211,21 +216,20 @@ fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
 
         // Find the first color that is not used by neighbors
         // This smells like a Leetcode problem but I don't feel like writing the O(1) space solution
-        let mut color = 2;
-        while used_colors.contains(&color) {
-            color += 1;
+        // Assign the smallest available color
+        for color in 0..k {
+            if !used_colors.contains(&color) {
+                graph.node_colors.insert(temp.clone(), color);
+                break;
+            }
         }
 
-        if color < k {
-            graph.node_colors.insert(temp.clone(), color);
-        } else {
-            // Spillover, no colors available for this temp
-            // Designate k as the "spillover" color
+        // Spillover, no colors available for this temp
+        // Designate k as the "spillover" color
+        if !graph.node_colors.contains_key(temp) {
             graph.node_colors.insert(temp.clone(), k);
         }
     }
-
-    println!("Assigments: {:?}", graph.node_colors);
 }
 
 /// Assigns temps to the 15 general-purpose registers.
@@ -443,7 +447,7 @@ mod tests {
     //
     register_allocator_test!(
         simple_linear_interference,
-        8,
+        4,
         parse_dependencies(
             r#"
             L1: x1 <- 1
