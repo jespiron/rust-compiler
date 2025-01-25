@@ -221,7 +221,7 @@ fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
 
 /// Assigns temps to the 15 general-purpose registers.
 /// Precondition: `dependencies` already hardcodes usage of the %eax and %edx registers
-///  for assembly lines that use the `ret` and `idiv` instructions. To explain, %eax and $edx
+///  for assembly lines that use the `ret` and `idiv` instructions. To explain, %eax and %edx
 /// are special for these instructions, as %eax holds the return value, while %edx
 /// holds the remainder when division is done.
 pub fn allocate_registers(dependencies: &Vec<Dependency>) -> Output {
