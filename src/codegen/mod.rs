@@ -2,6 +2,9 @@ use crate::parser::Program;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
+
+mod register_allocator;
+
 mod x86_encoding;
 use x86_encoding::{Memory, Op, RegOrMem, Register};
 
