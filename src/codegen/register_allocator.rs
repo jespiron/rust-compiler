@@ -152,8 +152,7 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
             // Case 2: t <- s instruction (move into t)
             //         Create an edge between t and any t_i that is live after this line,
             //         where t_i != t AND t_i != s.
-            if dep.is_move {
-                assert!(dep.uses.len() == 1);
+            if dep.is_move && dep.uses.len() == 1 {
                 criteria.insert(dep.uses.iter().next().unwrap());
             }
 
@@ -177,8 +176,6 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
             }
         }
     }
-
-    println!("Neighbors: {:?}", neighbors);
 
     InterferenceGraph {
         neighbors,
@@ -215,20 +212,10 @@ fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
         }
 
         // Find the first color that is not used by neighbors
-        // This smells like a Leetcode problem but I don't feel like writing the O(1) space solution
-        // Assign the smallest available color
-        for color in 0..k {
-            if !used_colors.contains(&color) {
-                graph.node_colors.insert(temp.clone(), color);
-                break;
-            }
-        }
-
-        // Spillover, no colors available for this temp
-        // Designate k as the "spillover" color
-        if !graph.node_colors.contains_key(temp) {
-            graph.node_colors.insert(temp.clone(), k);
-        }
+        // This smells like a Leetcode problem and yeah, I know there's a solution with O(1) space,
+        // but I like my slick iterator one-liners
+        let color = (0..k).find(|c| !used_colors.contains(c)).unwrap_or(k);
+        graph.node_colors.insert(temp.clone(), color);
     }
 }
 
@@ -388,6 +375,11 @@ mod tests {
         }
     }
 
+    fn is_valid_node(temp: &str) -> bool {
+        // Check if the temp is not a pure numeric literal
+        !temp.chars().all(|c| c.is_ascii_digit())
+    }
+
     fn parse_dependencies(input: &str) -> Vec<Dependency> {
         let line_regex = Regex::new(r"L(\d+):\s*(\S+)\s*<-\s*(.*)").unwrap();
         let arithmetic_regex = Regex::new(r"(\S+)\s*([+\-*/])\s*(\S+)").unwrap();
@@ -406,17 +398,17 @@ mod tests {
                             let right = arith_captures[3].to_string();
 
                             let mut uses = HashSet::new();
-                            if !left.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                            if is_valid_node(&left) {
                                 uses.insert(left);
                             }
-                            if !right.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                            if is_valid_node(&right) {
                                 uses.insert(right);
                             }
 
                             (uses, false)
                         } else {
                             // Simple move or constant assignment
-                            let uses = if !value.is_empty() {
+                            let uses = if !value.is_empty() && is_valid_node(value) {
                                 [value.to_string()].iter().cloned().collect()
                             } else {
                                 HashSet::new()
@@ -447,7 +439,7 @@ mod tests {
     //
     register_allocator_test!(
         simple_linear_interference,
-        4,
+        3,
         parse_dependencies(
             r#"
             L1: x1 <- 1
@@ -467,7 +459,7 @@ mod tests {
     //        bb- d
     register_allocator_test!(
         chordal_graph_temp_b_reuse,
-        8,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -489,7 +481,7 @@ mod tests {
     //
     register_allocator_test!(
         range_split_with_temp_reuse,
-        8,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -506,7 +498,7 @@ mod tests {
 
     register_allocator_test!(
         disconnected_graph_allocation,
-        8,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -522,7 +514,7 @@ mod tests {
 
     register_allocator_test!(
         high_pressure_register_allocation,
-        5,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -540,7 +532,7 @@ mod tests {
 
     register_allocator_test!(
         move_coalescing_scenario,
-        8,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -556,7 +548,7 @@ mod tests {
 
     register_allocator_test!(
         spillover_limited_registers,
-        5,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -574,7 +566,7 @@ mod tests {
 
     register_allocator_test!(
         triangular_interference,
-        8,
+        3,
         parse_dependencies(
             r#"
             L1: a <- 0
