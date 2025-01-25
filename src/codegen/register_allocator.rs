@@ -170,6 +170,11 @@ fn create_interference_graph(dependencies: &Vec<Dependency>) -> InterferenceGrap
                         .insert(temp.clone());
                 }
             }
+
+            // Create entry for the defined temp, if zero neighbors
+            if !neighbors.contains_key(temp) {
+                neighbors.insert(temp.clone(), HashSet::new());
+            }
         }
     }
 
@@ -189,6 +194,11 @@ fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
 
     // Color the rest with greedy approach
     for temp in graph.neighbors.keys() {
+        // Skip if already colored, especially for %eax and %edx
+        if graph.node_colors.contains_key(temp) {
+            continue;
+        }
+
         // Check the colors of neighboring nodes
         let mut used_colors = HashSet::new();
         if let Some(neighbors) = graph.neighbors.get(temp) {
@@ -214,6 +224,8 @@ fn assign_colors(graph: &mut InterferenceGraph, k: usize) {
             graph.node_colors.insert(temp.clone(), k);
         }
     }
+
+    println!("Assigments: {:?}", graph.node_colors);
 }
 
 /// Assigns temps to the 15 general-purpose registers.
@@ -253,32 +265,51 @@ mod tests {
         let mut defined_registers: HashMap<String, String> = HashMap::new();
 
         for (i, dependency) in input.dependencies.iter().enumerate() {
-            // Make sure all defined temps are assigned
+            // Ensure all defined temps are assigned
             if let Some(temp) = &dependency.defines {
                 if let Some(assignment) = &output.assignments[i] {
-                    println!("{} -> {}", assignment.temp, assignment.register);
-                    assert!(&assignment.temp == temp);
+                    assert!(
+                        assignment.temp == *temp,
+                        "Assignment mismatch at line {}",
+                        i
+                    );
+
+                    let assigned_register = &assignment.register;
 
                     // Check for register conflicts
-                    let assigned_register = &assignment.register;
                     for live_temp in &dependency.live_out {
                         if let Some(live_register) = defined_registers.get(live_temp) {
                             if live_register == assigned_register {
-                                return false; // Conflict: Two live temps share the same register
+                                eprintln!(
+                                    "Conflict: Register {} is used by both {} and {} at line {}",
+                                    assigned_register, live_temp, temp, i
+                                );
+                                return false;
                             }
                         }
                     }
 
+                    // Update defined registers
                     defined_registers.insert(temp.clone(), assigned_register.clone());
                 } else {
-                    // Temp not assigned to any register
-                    println!("FAIL, {} not found", temp);
+                    // Temp is not assigned a register
+                    eprintln!(
+                        "Temp {} defined at line {} is not assigned a register",
+                        temp, i
+                    );
                     return false;
                 }
             }
 
+            // Remove temps that are no longer live
+            defined_registers.retain(|temp, _| dependency.live_out.contains(temp));
+
             // Ensure no more than K registers are used
             if defined_registers.len() > input.k {
+                eprintln!(
+                    "Exceeded register limit ({} registers) at line {}",
+                    input.k, i
+                );
                 return false;
             }
         }
@@ -485,10 +516,9 @@ mod tests {
         )
     );
 
-    // NOTE: This should use less registers
     register_allocator_test!(
         high_pressure_register_allocation,
-        9,
+        5,
         parse_dependencies(
             r#"
             L1: a <- 0
@@ -504,7 +534,6 @@ mod tests {
         )
     );
 
-    // NOTE: This also should use less registers
     register_allocator_test!(
         move_coalescing_scenario,
         8,
@@ -523,7 +552,7 @@ mod tests {
 
     register_allocator_test!(
         spillover_limited_registers,
-        9,
+        5,
         parse_dependencies(
             r#"
             L1: a <- 0
