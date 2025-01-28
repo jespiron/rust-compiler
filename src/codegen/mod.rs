@@ -1,20 +1,35 @@
+use crate::lexer::Token;
 use crate::parser::Program;
-use std::fs::File;
-use std::io::{self, Write};
+use emit::{emit_abstract, emit_m6502, emit_x86};
+use std::io::{self};
 use std::path::PathBuf;
 
-mod register_allocator;
+mod context;
+use context::Context;
 
-mod x86_encoding;
-use x86_encoding::{Memory, Op, RegOrMem, Register};
+mod emit;
 
-pub fn generate_code(program: Program) -> Vec<u8> {
-    let ops = Vec::new();
-    ops
+pub enum Target {
+    AbstractAssembly,
+    X86,
+    M6502,
 }
 
-pub fn to_file(ops: Vec<u8>, outpath: PathBuf) -> io::Result<()> {
-    let mut file = File::create(&outpath)?;
-    file.write_all(&ops)?;
-    Ok(())
+pub fn generate_code(program: Program, target: Target, outpath: &PathBuf) -> io::Result<()> {
+    // Generate function contexts
+    let mut func_contexts: Vec<Context> = Vec::new();
+    for function in program.fns {
+        if let Token::Identifier(fname) = &function.identifier {
+            let mut context = Context::new(&fname);
+            context.generate(&function);
+            func_contexts.push(context);
+        }
+    }
+
+    // Finally, emit the program based on target
+    match target {
+        Target::AbstractAssembly => emit_abstract(&outpath, &func_contexts, &program.decl),
+        Target::X86 => emit_x86(&outpath, &func_contexts, &program.decl),
+        Target::M6502 => emit_m6502(&outpath, &func_contexts, &program.decl),
+    }
 }
