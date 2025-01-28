@@ -20,6 +20,7 @@ pub enum Token {
     Minus,
     Star,
     Slash,
+    Tilde,
 
     // One or two character tokens
     Less,
@@ -141,6 +142,7 @@ pub fn tokenize_from_string(contents: &str) -> Vec<Token> {
             '-' => tokens.push(Token::Minus),
             '*' => tokens.push(Token::Star),
             '/' => tokens.push(Token::Slash),
+            '~' => tokens.push(Token::Tilde),
             '<' => {
                 if let Some('=') = chars.peek() {
                     chars.next();
