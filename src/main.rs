@@ -121,7 +121,6 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
                 filename: filename.to_string(),
                 source: e,
             })?;
-            let ops = codegen::generate_code(program);
 
             // Construct the output path: src_dir/target/filename.o0
             let mut outpath = PathBuf::from(&config.src_dir);
@@ -134,12 +133,12 @@ fn compile_the_thing(config: Config) -> Result<(), CompileError> {
             outpath.set_extension("S");
 
             // Write the output file
-            codegen::to_file(ops, outpath.clone()).map_err(|e| {
-                CompileError::BinaryFileGenerationError {
+            codegen::generate_code(program, codegen::Target::AbstractAssembly, &outpath).map_err(
+                |e| CompileError::BinaryFileGenerationError {
                     outpath: outpath.to_string_lossy().into(),
                     source: e,
-                }
-            })?;
+                },
+            )?;
 
             Ok(())
         }

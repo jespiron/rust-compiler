@@ -347,7 +347,7 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, ParserError> {
-        if self.match_token(&[Token::Bang, Token::Minus]) {
+        if self.match_token(&[Token::Bang, Token::Minus, Token::Tilde]) {
             let operator = self.previous();
             let right = self.unary()?;
             return Ok(Expr::Unary(operator, Box::new(right)));
