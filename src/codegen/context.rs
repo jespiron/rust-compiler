@@ -42,7 +42,7 @@ pub enum Operand {
     Var(Dest),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct AsmLabel(usize);
 
 /// Context for a function
@@ -74,86 +74,101 @@ impl Context {
 
     pub fn generate(&mut self, fn_declaration: &FnDeclaration) {
         for statement in &fn_declaration.body.statements {
-            match statement {
-                Statement::VarDecl(declr) => {
-                    if let Token::Identifier(varname) = &declr.identifier {
-                        // Create temp for new variable
-                        let dest_temp = self.new_temp();
-                        self.var_to_temp.insert(varname.clone(), dest_temp);
-                        let dest = Dest::Temp(dest_temp);
+            self.generate_statement(statement);
+        }
+    }
 
-                        // Compute the expression, populate in temp
-                        let src = self.generate_expr(&declr.value);
-                        self.instructions
-                            .push(AbstractAssemblyInstruction::Mov { dest, src });
-                    } else {
-                        panic!("Invalid identifier"); // Better error handling here
-                    }
-                }
-                Statement::If(condition_expr, then_branch, else_branch) => {
-                    // With else branch:
-                    //  1. Check condition
-                    //      if false, jump to else_label
-                    //      otherwise, resume to then logic
-                    //  2. -- then logic is here --
-                    //      jump to finish_label
-                    //  3. else_label:
-                    //      blah blah blah
-                    //      continue to finish_label
-                    //  4. finish_label:
-                    // -- rest of program continues here --
-                    //
-                    // Without else branch:
-                    //  1. Check condition
-                    //      if false, jump to finish_label
-                    //      otherwise, resume to then logic
-                    //  2. -- then logic --
-                    //  3. finish_label:
-                    //  -- rest of program continues here --
+    fn generate_statement(&mut self, statement: &Statement) {
+        match statement {
+            Statement::VarDecl(declr) => {
+                if let Token::Identifier(varname) = &declr.identifier {
+                    // Create temp for new variable
+                    let dest_temp = self.new_temp();
+                    self.var_to_temp.insert(varname.clone(), dest_temp);
+                    let dest = Dest::Temp(dest_temp);
 
-                    // First, check whether we're generating with or without else branch
-                    let has_else = else_branch.is_some();
-
-                    // 1. Generate code for checking condition
-                    // If condition does not hold, jump to appropriate label
-                    // Otherwise, if condition holds, fall into the "then" branch
-                    let finish_label = AsmLabel(self.new_label());
-                    let tgt_false = if has_else {
-                        finish_label
-                    } else {
-                        let else_label = AsmLabel(self.new_label());
-                        else_label
-                    };
-
-                    let condition_result = match self.generate_expr(condition_expr) {
-                        Operand::Const(val) => {
-                            let dest = Dest::Temp(self.new_temp());
-                            self.instructions.push(AbstractAssemblyInstruction::Mov {
-                                dest: dest.clone(),
-                                src: Operand::Const(val),
-                            });
-                            dest
-                        }
-                        Operand::Var(dest) => dest,
-                    };
-
+                    // Compute the expression, populate in temp
+                    let src = self.generate_expr(&declr.value);
                     self.instructions
-                        .push(AbstractAssemblyInstruction::JmpCondition {
-                            condition: condition_result,
-                            tgt_false,
-                        });
-
-                    // 2. Generate code for "then" branch
-                    // If the "else" branch exists, we must jump to finish_label when done
-                    // Otherwise, we can just fall into the finish_label
-
-                    //
-
-                    // Next, generate
-                    if let Some(else_branch) = else_branch {}
+                        .push(AbstractAssemblyInstruction::Mov { dest, src });
+                } else {
+                    panic!("Invalid identifier"); // Better error handling here
                 }
-                _ => unimplemented!("Unsupported statement"),
             }
+            Statement::If(condition_expr, then_branch, else_branch) => {
+                // With else branch:
+                //  1. Check condition
+                //      if false, jump to else_label
+                //      otherwise, resume to then logic
+                //  2. -- then logic is here --
+                //      jump to finish_label
+                //  3. else_label:
+                //      blah blah blah
+                //      continue to finish_label
+                //  4. finish_label:
+                // -- rest of program continues here --
+                //
+                // Without else branch:
+                //  1. Check condition
+                //      if false, jump to finish_label
+                //      otherwise, resume to then logic
+                //  2. -- then logic --
+                //  3. finish_label:
+                //  -- rest of program continues here --
+
+                // First, check whether we're generating with or without else branch
+                let has_else = else_branch.is_some();
+
+                // 1. Generate code for checking condition
+                // If condition does not hold, jump to appropriate label
+                // Otherwise, if condition holds, fall into the "then" branch
+                let finish_label = AsmLabel(self.new_label());
+                let tgt_false = if has_else {
+                    finish_label
+                } else {
+                    let else_label = AsmLabel(self.new_label());
+                    else_label
+                };
+
+                let condition_result = match self.generate_expr(condition_expr) {
+                    Operand::Const(val) => {
+                        let dest = Dest::Temp(self.new_temp());
+                        self.instructions.push(AbstractAssemblyInstruction::Mov {
+                            dest: dest.clone(),
+                            src: Operand::Const(val),
+                        });
+                        dest
+                    }
+                    Operand::Var(dest) => dest,
+                };
+
+                self.instructions
+                    .push(AbstractAssemblyInstruction::JmpCondition {
+                        condition: condition_result,
+                        tgt_false,
+                    });
+
+                // 2. Generate code for "then" branch
+                // If the "else" branch exists, we must jump to finish_label when done
+                // Otherwise, we can just fall into the finish_label
+                self.generate_statement(then_branch);
+                if has_else {
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::Jmp(finish_label));
+                }
+
+                // 3. Next, generate else branch
+                if let Some(else_branch) = else_branch {
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::Lbl(tgt_false));
+                    self.generate_statement(else_branch);
+                }
+
+                // End with finish label
+                self.instructions
+                    .push(AbstractAssemblyInstruction::Lbl(finish_label));
+            }
+            _ => unimplemented!("Unsupported statement"),
         }
     }
 
