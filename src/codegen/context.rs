@@ -66,6 +66,8 @@ impl Context {
             instructions: Vec::new(),
             temp_counter: 0,
             label_counter: 0,
+            /// TODO: if we're converting to SSA, then we'd want to create a new version of each variable
+            /// for each assignment, as well as for each branch. Also some way of placing phi nodes
             var_to_temp: HashMap::new(),
         }
     }
