@@ -19,9 +19,18 @@ pub enum AbstractAssemblyInstruction {
         dest: Dest,
         src: Operand,
     },
+    JmpCondition {
+        condition: Dest,
+        /// Where to jump if condition is false
+        tgt_false: AsmLabel,
+    },
+    Test(Dest),         // Set ZF if Dest is zero, otherwise clears the flag
+    Cmp(Dest, Operand), // Sets ZF and CF for conditional jumps
+    Jmp(AsmLabel),
+    Lbl(AsmLabel),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Dest {
     Register(usize),
     Temp(usize),
@@ -32,6 +41,9 @@ pub enum Operand {
     Const(i128),
     Var(Dest),
 }
+
+#[derive(Debug)]
+pub struct AsmLabel(usize);
 
 /// Context for a function
 pub struct Context {
@@ -75,6 +87,68 @@ impl Context {
                     } else {
                         panic!("Invalid identifier"); // Better error handling here
                     }
+                }
+                Statement::If(condition_expr, then_branch, else_branch) => {
+                    // With else branch:
+                    //  1. Check condition
+                    //      if false, jump to else_label
+                    //      otherwise, resume to then logic
+                    //  2. -- then logic is here --
+                    //      jump to finish_label
+                    //  3. else_label:
+                    //      blah blah blah
+                    //      continue to finish_label
+                    //  4. finish_label:
+                    // -- rest of program continues here --
+                    //
+                    // Without else branch:
+                    //  1. Check condition
+                    //      if false, jump to finish_label
+                    //      otherwise, resume to then logic
+                    //  2. -- then logic --
+                    //  3. finish_label:
+                    //  -- rest of program continues here --
+
+                    // First, check whether we're generating with or without else branch
+                    let has_else = else_branch.is_some();
+
+                    // 1. Generate code for checking condition
+                    // If condition does not hold, jump to appropriate label
+                    // Otherwise, if condition holds, fall into the "then" branch
+                    let finish_label = AsmLabel(self.new_label());
+                    let tgt_false = if has_else {
+                        finish_label
+                    } else {
+                        let else_label = AsmLabel(self.new_label());
+                        else_label
+                    };
+
+                    let condition_result = match self.generate_expr(condition_expr) {
+                        Operand::Const(val) => {
+                            let dest = Dest::Temp(self.new_temp());
+                            self.instructions.push(AbstractAssemblyInstruction::Mov {
+                                dest: dest.clone(),
+                                src: Operand::Const(val),
+                            });
+                            dest
+                        }
+                        Operand::Var(dest) => dest,
+                    };
+
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::JmpCondition {
+                            condition: condition_result,
+                            tgt_false,
+                        });
+
+                    // 2. Generate code for "then" branch
+                    // If the "else" branch exists, we must jump to finish_label when done
+                    // Otherwise, we can just fall into the finish_label
+
+                    //
+
+                    // Next, generate
+                    if let Some(else_branch) = else_branch {}
                 }
                 _ => unimplemented!("Unsupported statement"),
             }
