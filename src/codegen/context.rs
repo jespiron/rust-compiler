@@ -24,8 +24,8 @@ pub enum AbstractAssemblyInstruction {
         /// Where to jump if condition is false
         tgt_false: AsmLabel,
     },
-    Test(Dest),         // Set ZF if Dest is zero, otherwise clears the flag
-    Cmp(Dest, Operand), // Sets ZF and CF for conditional jumps
+    Test(Dest),
+    Cmp(Dest, Operand),
     Jmp(AsmLabel),
     Lbl(AsmLabel),
     Return(Operand),
@@ -208,13 +208,28 @@ impl Context {
                 let right_operand = self.generate_expr(right);
                 let dest_temp = self.new_temp();
                 let dest = Dest::Temp(dest_temp);
-                // TODO: if op is Equals (aka reassignment), distinguish mutable from immutable variables
-                self.instructions.push(AbstractAssemblyInstruction::BinOp {
-                    op: op.clone(),
-                    dest,
-                    src1: left_operand,
-                    src2: right_operand,
-                });
+                match op {
+                    // TODO: distinguish mutable from immutable variables
+                    Token::Equal => {
+                        if let Operand::Var(left_dest) = left_operand {
+                            self.instructions.push(AbstractAssemblyInstruction::Mov {
+                                dest: left_dest,
+                                src: right_operand,
+                            })
+                        } else {
+                            panic!("left side of assignment must be variable");
+                        }
+                    }
+                    _ => {
+                        self.instructions.push(AbstractAssemblyInstruction::BinOp {
+                            op: op.clone(),
+                            dest,
+                            src1: left_operand,
+                            src2: right_operand,
+                        });
+                    }
+                }
+
                 Operand::Var(Dest::Temp(dest_temp))
             }
             Expr::Parentheses(expr) => self.generate_expr(expr),

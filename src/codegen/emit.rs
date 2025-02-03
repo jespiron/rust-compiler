@@ -48,7 +48,7 @@ pub fn emit_abstract(
                             Token::Minus => "-",
                             Token::Star => "*",
                             Token::Slash => "/",
-                            Token::Equal => "=",
+                            Token::EqualEqual => "==",
                             Token::Greater => ">",
                             Token::GreaterEqual => ">=",
                             Token::Less => "<",
