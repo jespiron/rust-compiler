@@ -19,15 +19,22 @@ pub enum AbstractAssemblyInstruction {
         dest: Dest,
         src: Operand,
     },
+    Cmp {
+        left: Operand,
+        right: Operand,
+        condition: Condition,
+    },
     JmpCondition {
-        condition: Dest,
-        /// Where to jump if condition is false
+        condition: Condition,
+        tgt_true: AsmLabel,
         tgt_false: AsmLabel,
     },
-    Test(Dest),
-    Cmp(Dest, Operand),
     Jmp(AsmLabel),
     Lbl(AsmLabel),
+    Phi {
+        dest: Dest,
+        srcs: Vec<(Operand, AsmLabel)>,
+    },
     Return(Operand),
     ReturnVoid,
 }
@@ -46,6 +53,16 @@ pub enum Operand {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AsmLabel(pub usize);
+
+#[derive(Debug)]
+pub enum Condition {
+    Greater,
+    Less,
+    Equal,
+    NotEqual,
+    GreaterOrEqual,
+    LessOrEqual,
+}
 
 /// Context for a function
 pub struct Context {
