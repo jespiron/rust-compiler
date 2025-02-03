@@ -1,4 +1,4 @@
-use super::context::{AbstractAssemblyInstruction, Context, Dest, Operand};
+use super::context::{AbstractAssemblyInstruction, AsmLabel, Context, Dest, Operand};
 use crate::lexer::Token;
 use crate::parser::VarDeclaration;
 use std::fs::File;
@@ -19,10 +19,14 @@ fn serialize_operand(operand: &Operand) -> String {
     }
 }
 
+fn serialize_label(label: &AsmLabel) -> String {
+    format!("L{}", label.0)
+}
+
 pub fn emit_abstract(
     outpath: &PathBuf,
     func_contexts: &Vec<Context>,
-    globals: &Vec<VarDeclaration>,
+    _globals: &Vec<VarDeclaration>,
 ) -> io::Result<()> {
     let mut file = File::create(&outpath)?;
     for context in func_contexts {
@@ -65,6 +69,38 @@ pub fn emit_abstract(
                 AbstractAssemblyInstruction::Mov { dest, src } => {
                     format!("{} <- {}\n", serialize_dest(&dest), serialize_operand(&src))
                 }
+                AbstractAssemblyInstruction::JmpCondition {
+                    condition,
+                    tgt_false,
+                } => {
+                    format!(
+                        "jmp_if_false {} {}\n",
+                        serialize_dest(condition),
+                        serialize_label(tgt_false)
+                    )
+                }
+                AbstractAssemblyInstruction::Test(dest) => {
+                    format!("test {}\n", serialize_dest(dest))
+                }
+                AbstractAssemblyInstruction::Cmp(dest, operand) => {
+                    format!(
+                        "cmp {}, {}\n",
+                        serialize_dest(dest),
+                        serialize_operand(operand)
+                    )
+                }
+                AbstractAssemblyInstruction::Jmp(label) => {
+                    format!("jmp {}\n", serialize_label(label))
+                }
+                AbstractAssemblyInstruction::Lbl(label) => {
+                    format!("{}:\n", serialize_label(label))
+                }
+                AbstractAssemblyInstruction::Return(operand) => {
+                    format!("%eax <- {}\nret\n", serialize_operand(operand))
+                }
+                AbstractAssemblyInstruction::ReturnVoid => {
+                    format!("ret\n")
+                }
             };
 
             file.write_all(line.as_bytes())?;
@@ -76,18 +112,18 @@ pub fn emit_abstract(
 
 pub fn emit_x86(
     outpath: &PathBuf,
-    func_contexts: &Vec<Context>,
-    globals: &Vec<VarDeclaration>,
+    _func_contexts: &Vec<Context>,
+    _globals: &Vec<VarDeclaration>,
 ) -> io::Result<()> {
-    let mut file = File::create(&outpath)?;
+    let _file = File::create(&outpath)?;
     Ok(())
 }
 
 pub fn emit_m6502(
     outpath: &PathBuf,
-    func_contexts: &Vec<Context>,
-    globals: &Vec<VarDeclaration>,
+    _func_contexts: &Vec<Context>,
+    _globals: &Vec<VarDeclaration>,
 ) -> io::Result<()> {
-    let mut file = File::create(&outpath)?;
+    let _file = File::create(&outpath)?;
     Ok(())
 }

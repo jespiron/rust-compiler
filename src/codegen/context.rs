@@ -28,6 +28,8 @@ pub enum AbstractAssemblyInstruction {
     Cmp(Dest, Operand), // Sets ZF and CF for conditional jumps
     Jmp(AsmLabel),
     Lbl(AsmLabel),
+    Return(Operand),
+    ReturnVoid,
 }
 
 #[derive(Debug, Clone)]
@@ -43,7 +45,7 @@ pub enum Operand {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AsmLabel(usize);
+pub struct AsmLabel(pub usize);
 
 /// Context for a function
 pub struct Context {
@@ -96,26 +98,6 @@ impl Context {
                 }
             }
             Statement::If(condition_expr, then_branch, else_branch) => {
-                // With else branch:
-                //  1. Check condition
-                //      if false, jump to else_label
-                //      otherwise, resume to then logic
-                //  2. -- then logic is here --
-                //      jump to finish_label
-                //  3. else_label:
-                //      blah blah blah
-                //      continue to finish_label
-                //  4. finish_label:
-                // -- rest of program continues here --
-                //
-                // Without else branch:
-                //  1. Check condition
-                //      if false, jump to finish_label
-                //      otherwise, resume to then logic
-                //  2. -- then logic --
-                //  3. finish_label:
-                //  -- rest of program continues here --
-
                 // First, check whether we're generating with or without else branch
                 let has_else = else_branch.is_some();
 
@@ -124,10 +106,10 @@ impl Context {
                 // Otherwise, if condition holds, fall into the "then" branch
                 let finish_label = AsmLabel(self.new_label());
                 let tgt_false = if has_else {
-                    finish_label
-                } else {
                     let else_label = AsmLabel(self.new_label());
                     else_label
+                } else {
+                    finish_label
                 };
 
                 let condition_result = match self.generate_expr(condition_expr) {
@@ -142,6 +124,8 @@ impl Context {
                     Operand::Var(dest) => dest,
                 };
 
+                self.instructions
+                    .push(AbstractAssemblyInstruction::Test(condition_result.clone()));
                 self.instructions
                     .push(AbstractAssemblyInstruction::JmpCondition {
                         condition: condition_result,
@@ -168,7 +152,26 @@ impl Context {
                 self.instructions
                     .push(AbstractAssemblyInstruction::Lbl(finish_label));
             }
-            _ => unimplemented!("Unsupported statement"),
+            Statement::Block(block) => {
+                // Handle blocks by generating all their statements
+                for stmt in &block.statements {
+                    self.generate_statement(stmt);
+                }
+            }
+            Statement::Return(value) => {
+                if let Some(expr) = value {
+                    let operand = self.generate_expr(expr);
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::Return(operand));
+                } else {
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::ReturnVoid);
+                }
+            }
+            Statement::Expression(expr) => {
+                self.generate_expr(expr);
+            }
+            _ => unimplemented!("Unsupported statement {:?}", statement),
         }
     }
 
@@ -180,6 +183,7 @@ impl Context {
                 Token::Number(num) => Operand::Const(*num as i128),
                 _ => panic!("Invalid literal"),
             },
+            // Basic arithmetic expressions
             Expr::Unary(op, src) => {
                 let src_operand = self.generate_expr(src);
                 let dest_temp = self.new_temp();
@@ -196,6 +200,7 @@ impl Context {
                 let right_operand = self.generate_expr(right);
                 let dest_temp = self.new_temp();
                 let dest = Dest::Temp(dest_temp);
+                // TODO: if op is Equals (aka reassignment), distinguish mutable from immutable variables
                 self.instructions.push(AbstractAssemblyInstruction::BinOp {
                     op: op.clone(),
                     dest,
