@@ -48,7 +48,12 @@ pub fn emit_abstract(
                             Token::Minus => "-",
                             Token::Star => "*",
                             Token::Slash => "/",
-                            _ => unimplemented!("Unsupported binary operation"),
+                            Token::Equal => "=",
+                            Token::Greater => ">",
+                            Token::GreaterEqual => ">=",
+                            Token::Less => "<",
+                            Token::LessEqual => "<=",
+                            _ => unimplemented!("Unsupported binary operation {:?}", op),
                         },
                         serialize_operand(&src2)
                     )

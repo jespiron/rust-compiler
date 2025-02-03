@@ -75,6 +75,14 @@ impl Context {
     }
 
     pub fn generate(&mut self, fn_declaration: &FnDeclaration) {
+        // Assign parameters to temps
+        for (param_idx, param) in fn_declaration.params.iter().enumerate() {
+            if let Token::Identifier(param_name) = &param.identifier {
+                let dest_temp = self.new_temp();
+                self.var_to_temp.insert(param_name.clone(), dest_temp);
+            }
+        }
+
         for statement in &fn_declaration.body.statements {
             self.generate_statement(statement);
         }
