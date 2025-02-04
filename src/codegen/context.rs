@@ -1,7 +1,7 @@
+use crate::codegen::ssa::{BasicBlock, SSABuilder};
 use crate::lexer::Token;
 use crate::parser::{Block, Expr, FnDeclaration, Program, Statement, VarDeclaration};
 use std::collections::HashMap;
-use std::mem::uninitialized;
 
 #[derive(Debug)]
 pub enum AbstractAssemblyInstruction {
@@ -81,6 +81,8 @@ pub struct Context {
     label_counter: usize,
     /// Given a variable name, get the associated temp
     var_to_temp: HashMap<String, usize>,
+    /// For converting to SSA form
+    ssa_builder: SSABuilder,
 }
 
 impl Context {
@@ -90,9 +92,8 @@ impl Context {
             instructions: Vec::new(),
             temp_counter: 0,
             label_counter: 0,
-            /// TODO: if we're converting to SSA, then we'd want to create a new version of each variable
-            /// for each assignment, as well as for each branch. Also some way of placing phi nodes
             var_to_temp: HashMap::new(),
+            ssa_builder: SSABuilder::new(),
         }
     }
 

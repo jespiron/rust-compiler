@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 mod context;
 use context::Context;
-
 mod emit;
+mod ssa;
 
 pub enum Target {
     AbstractAssembly,
