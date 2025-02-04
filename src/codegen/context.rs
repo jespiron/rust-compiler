@@ -1,6 +1,7 @@
 use crate::lexer::Token;
 use crate::parser::{Block, Expr, FnDeclaration, Program, Statement, VarDeclaration};
 use std::collections::HashMap;
+use std::mem::uninitialized;
 
 #[derive(Debug)]
 pub enum AbstractAssemblyInstruction {
@@ -134,61 +135,37 @@ impl Context {
                 // If condition does not hold, jump to appropriate label
                 // Otherwise, if condition holds, fall into the "then" branch
                 let then_label = AsmLabel(self.new_label());
-                let finish_label = AsmLabel(self.new_label());
-                let tgt_false = if has_else {
-                    let else_label = AsmLabel(self.new_label());
-                    else_label
+                let end_label = AsmLabel(self.new_label());
+                let else_label = if else_branch.is_some() {
+                    AsmLabel(self.new_label())
                 } else {
-                    finish_label
+                    end_label
                 };
 
-                let condition_result = match self.generate_expr(condition_expr) {
-                    Operand::Const(val) => {
-                        let dest = Dest::Temp(self.new_temp());
-                        self.instructions.push(AbstractAssemblyInstruction::Mov {
-                            dest: dest.clone(),
-                            src: Operand::Const(val),
-                        });
-                        dest
-                    }
-                    Operand::Var(dest) => dest,
-                };
-
-                self.instructions
-                    .push(AbstractAssemblyInstruction::Compare {
-                        left: Operand::Var(condition_result),
-                        right: Operand::Const(0),
-                        condition: Condition::NotEqual,
-                    });
-
-                self.instructions
-                    .push(AbstractAssemblyInstruction::JmpCondition {
-                        condition: Condition::NotEqual,
-                        tgt_true: then_label,
-                        tgt_false,
-                    });
+                // Generate condition evaluation
+                self.generate_condition(condition_expr, then_label, else_label);
 
                 // 2. Generate code for "then" branch
-                // If the "else" branch exists, we must jump to finish_label when done
-                // Otherwise, we can just fall into the finish_label
+                // If the "else" branch exists, we must jump to end_label when done
+                // Otherwise, we can just fall into the end_label
                 self.instructions
                     .push(AbstractAssemblyInstruction::Lbl(then_label));
                 self.generate_statement(then_branch);
                 if has_else {
                     self.instructions
-                        .push(AbstractAssemblyInstruction::Jmp(finish_label));
+                        .push(AbstractAssemblyInstruction::Jmp(end_label));
                 }
 
                 // 3. Next, generate else branch
                 if let Some(else_branch) = else_branch {
                     self.instructions
-                        .push(AbstractAssemblyInstruction::Lbl(tgt_false));
+                        .push(AbstractAssemblyInstruction::Lbl(else_label));
                     self.generate_statement(else_branch);
                 }
 
                 // End with finish label
                 self.instructions
-                    .push(AbstractAssemblyInstruction::Lbl(finish_label));
+                    .push(AbstractAssemblyInstruction::Lbl(end_label));
             }
             Statement::Block(block) => {
                 // Handle blocks by generating all their statements
@@ -211,6 +188,64 @@ impl Context {
             }
             _ => unimplemented!("Unsupported statement {:?}", statement),
         }
+    }
+
+    fn generate_condition(
+        &mut self,
+        condition_expr: &Expr,
+        then_label: AsmLabel,
+        else_label: AsmLabel,
+    ) {
+        match condition_expr {
+            Expr::Binary(left, op, right) => {
+                let condition = match op {
+                    Token::Less => Condition::Less,
+                    Token::Greater => Condition::Greater,
+                    Token::EqualEqual => Condition::Equal,
+                    Token::BangEqual => Condition::NotEqual,
+                    Token::LessEqual => Condition::LessOrEqual,
+                    Token::GreaterEqual => Condition::GreaterOrEqual,
+                    _ => panic!("Unsupported binary operation in condition"),
+                };
+
+                let left_op = self.generate_expr(left);
+                let right_op = self.generate_expr(right);
+
+                // Emit compare instruction
+                self.instructions
+                    .push(AbstractAssemblyInstruction::Compare {
+                        left: left_op,
+                        right: right_op,
+                        condition: condition.clone(),
+                    });
+
+                // Use direct conditional jump
+                self.instructions
+                    .push(AbstractAssemblyInstruction::JmpCondition {
+                        condition,
+                        tgt_true: then_label,
+                        tgt_false: else_label,
+                    });
+            }
+            other_expr => {
+                let result = self.generate_expr(other_expr);
+
+                // Assume result is a boolean (0 = false, anything else = true)
+                self.instructions
+                    .push(AbstractAssemblyInstruction::Compare {
+                        left: result,
+                        right: Operand::Const(0),
+                        condition: Condition::NotEqual,
+                    });
+
+                self.instructions
+                    .push(AbstractAssemblyInstruction::JmpCondition {
+                        condition: Condition::NotEqual,
+                        tgt_true: then_label,
+                        tgt_false: else_label,
+                    });
+            }
+        };
     }
 
     /// Returns the location that the result is stored in
@@ -304,8 +339,13 @@ impl Context {
                     panic!("Invalid variable token");
                 }
             }
+            Expr::Call(identifier, args) => self.generate_function_call(identifier, args),
             _ => panic!("Unsupported expression"),
         }
+    }
+
+    fn generate_function_call(&mut self, identifier: &Expr, args: &Vec<Expr>) -> Operand {
+        unimplemented!("Function calls not implemented");
     }
 
     /// Generates a new temp
