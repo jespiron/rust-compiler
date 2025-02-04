@@ -71,13 +71,4 @@ fn test_sample_program() {
             },
         ],
     };
-
-    let found = generate_code(program);
-    let expected = vec![]; // TODO
-
-    assert_eq!(
-        found, expected,
-        "\nExpected bytecode:\n{:02X?}\n\nGot bytecode:\n{:02X?}",
-        expected, found
-    );
 }

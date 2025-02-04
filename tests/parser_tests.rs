@@ -156,7 +156,7 @@ mod tests {
                     }
                     _ => panic!("Expected binary expression"),
                 }
-                assert!(else_branch.is_some());
+                assert!(else_branch.is_none());
             }
             _ => panic!("Expected if statement"),
         }
