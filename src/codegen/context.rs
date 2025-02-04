@@ -161,11 +161,9 @@ impl Context {
                     self.instructions
                         .push(AbstractAssemblyInstruction::Lbl(else_label));
                     self.generate_statement(else_branch);
+                    self.instructions
+                        .push(AbstractAssemblyInstruction::Lbl(end_label));
                 }
-
-                // End with finish label
-                self.instructions
-                    .push(AbstractAssemblyInstruction::Lbl(end_label));
             }
             Statement::Block(block) => {
                 // Handle blocks by generating all their statements

@@ -218,17 +218,14 @@ impl Parser {
     }
 
     fn if_statement(&mut self) -> Result<Statement, ParserError> {
-        self.consume(&Token::LeftParen);
+        self.consume(&Token::LeftParen)?;
         let condition = self.expression()?;
-        self.consume(&Token::RightParen);
+        self.consume(&Token::RightParen)?;
 
         let then_branch = Box::new(self.statement()?);
 
         let else_branch = if self.peek() == Token::Else {
             self.advance(); // consume the 'else' token
-            Some(Box::new(self.statement()?))
-        } else if !matches!(self.peek(), Token::RightBrace) {
-            // if we're not at the end of a block, treat the next statement as an implicit else
             Some(Box::new(self.statement()?))
         } else {
             None
