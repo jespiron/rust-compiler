@@ -1,4 +1,4 @@
-use super::context::{AbstractAssemblyInstruction, AsmLabel, Context, Dest, Operand};
+use super::context::{AbstractAssemblyInstruction, AsmLabel, Condition, Context, Dest, Operand};
 use crate::lexer::Token;
 use crate::parser::VarDeclaration;
 use std::fs::File;
@@ -16,6 +16,17 @@ fn serialize_operand(operand: &Operand) -> String {
     match operand {
         Operand::Const(value) => format!("${}", value),
         Operand::Var(dest) => format!("{}", serialize_dest(dest)),
+    }
+}
+
+fn serialize_condition(condition: &Condition) -> String {
+    match condition {
+        Condition::Greater => format!("is_g"),
+        Condition::Less => format!("is_l"),
+        Condition::Equal => format!("is_eq"),
+        Condition::NotEqual => format!("is_neq"),
+        Condition::GreaterOrEqual => format!("is_geq"),
+        Condition::LessOrEqual => format!("is_leq"),
     }
 }
 
@@ -76,22 +87,33 @@ pub fn emit_abstract(
                 }
                 AbstractAssemblyInstruction::JmpCondition {
                     condition,
+                    tgt_true,
                     tgt_false,
                 } => {
                     format!(
-                        "jmp_if_false {} {}\n",
-                        serialize_dest(condition),
+                        "jmp {} {} {}\n",
+                        serialize_condition(condition),
+                        serialize_label(tgt_true),
                         serialize_label(tgt_false)
                     )
                 }
-                AbstractAssemblyInstruction::Test(dest) => {
-                    format!("test {}\n", serialize_dest(dest))
-                }
-                AbstractAssemblyInstruction::Cmp(dest, operand) => {
+                AbstractAssemblyInstruction::Compare {
+                    left,
+                    right,
+                    condition,
+                } => {
                     format!(
-                        "cmp {}, {}\n",
+                        "cmp {} {} {}\n",
+                        serialize_operand(left),
+                        serialize_condition(condition),
+                        serialize_operand(right)
+                    )
+                }
+                AbstractAssemblyInstruction::SetIf { dest, condition } => {
+                    format!(
+                        "set {} {}\n",
                         serialize_dest(dest),
-                        serialize_operand(operand)
+                        serialize_condition(condition)
                     )
                 }
                 AbstractAssemblyInstruction::Jmp(label) => {
@@ -105,6 +127,20 @@ pub fn emit_abstract(
                 }
                 AbstractAssemblyInstruction::ReturnVoid => {
                     format!("ret\n")
+                }
+                AbstractAssemblyInstruction::Phi { dest, srcs } => {
+                    format!(
+                        "phi {} {}\n",
+                        serialize_dest(dest),
+                        srcs.iter()
+                            .map(|(operand, label)| format!(
+                                "({}, {})",
+                                serialize_operand(operand),
+                                serialize_label(label)
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 }
             };
 
@@ -121,6 +157,9 @@ pub fn emit_x86(
     _globals: &Vec<VarDeclaration>,
 ) -> io::Result<()> {
     let _file = File::create(&outpath)?;
+    // ...
+    // for each context of each function, iterate context.instructions and emit as x86 code
+    // ...
     Ok(())
 }
 
@@ -130,5 +169,8 @@ pub fn emit_m6502(
     _globals: &Vec<VarDeclaration>,
 ) -> io::Result<()> {
     let _file = File::create(&outpath)?;
+    // ...
+    // for each context of each function, iterate context.instructions and emit as x86 code
+    // ...
     Ok(())
 }

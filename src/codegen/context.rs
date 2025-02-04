@@ -19,9 +19,13 @@ pub enum AbstractAssemblyInstruction {
         dest: Dest,
         src: Operand,
     },
-    Cmp {
+    Compare {
         left: Operand,
         right: Operand,
+        condition: Condition,
+    },
+    SetIf {
+        dest: Dest,
         condition: Condition,
     },
     JmpCondition {
@@ -54,7 +58,7 @@ pub enum Operand {
 #[derive(Debug, Clone, Copy)]
 pub struct AsmLabel(pub usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Condition {
     Greater,
     Less,
@@ -129,6 +133,7 @@ impl Context {
                 // 1. Generate code for checking condition
                 // If condition does not hold, jump to appropriate label
                 // Otherwise, if condition holds, fall into the "then" branch
+                let then_label = AsmLabel(self.new_label());
                 let finish_label = AsmLabel(self.new_label());
                 let tgt_false = if has_else {
                     let else_label = AsmLabel(self.new_label());
@@ -150,16 +155,24 @@ impl Context {
                 };
 
                 self.instructions
-                    .push(AbstractAssemblyInstruction::Test(condition_result.clone()));
+                    .push(AbstractAssemblyInstruction::Compare {
+                        left: Operand::Var(condition_result),
+                        right: Operand::Const(0),
+                        condition: Condition::NotEqual,
+                    });
+
                 self.instructions
                     .push(AbstractAssemblyInstruction::JmpCondition {
-                        condition: condition_result,
+                        condition: Condition::NotEqual,
+                        tgt_true: then_label,
                         tgt_false,
                     });
 
                 // 2. Generate code for "then" branch
                 // If the "else" branch exists, we must jump to finish_label when done
                 // Otherwise, we can just fall into the finish_label
+                self.instructions
+                    .push(AbstractAssemblyInstruction::Lbl(then_label));
                 self.generate_statement(then_branch);
                 if has_else {
                     self.instructions
@@ -236,6 +249,36 @@ impl Context {
                         } else {
                             panic!("left side of assignment must be variable");
                         }
+                    }
+                    Token::Greater
+                    | Token::Less
+                    | Token::EqualEqual
+                    | Token::BangEqual
+                    | Token::GreaterEqual
+                    | Token::LessEqual => {
+                        let condition = match op {
+                            Token::Greater => Condition::Greater,
+                            Token::Less => Condition::Less,
+                            Token::EqualEqual => Condition::Equal,
+                            Token::BangEqual => Condition::NotEqual,
+                            Token::GreaterEqual => Condition::GreaterOrEqual,
+                            Token::LessEqual => Condition::LessOrEqual,
+                            _ => unreachable!(),
+                        };
+
+                        self.instructions
+                            .push(AbstractAssemblyInstruction::Compare {
+                                left: left_operand,
+                                right: right_operand,
+                                condition: condition.clone(),
+                            });
+
+                        self.instructions.push(AbstractAssemblyInstruction::SetIf {
+                            dest: dest.clone(),
+                            condition,
+                        });
+
+                        return Operand::Var(dest);
                     }
                     _ => {
                         self.instructions.push(AbstractAssemblyInstruction::BinOp {
